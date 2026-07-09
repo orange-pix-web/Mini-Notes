@@ -1,0 +1,176 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background-color: #f8fafc;
+  color: #1e293b;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.editor-content {
+  font-family: "SF Mono", "Monaco", "Inconsolata", "Fira Mono", "Roboto Mono", monospace;
+  line-height: 1.6;
+}
+
+.editor-content:focus {
+  outline: none;
+}
+
+.markdown-preview {
+  line-height: 1.8;
+}
+
+.markdown-preview h1 {
+  font-size: 1.875rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 0.5rem;
+}
+
+.markdown-preview h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.markdown-preview h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  margin-top: 1rem;
+}
+
+.markdown-preview p {
+  margin-bottom: 0.75rem;
+}
+
+.markdown-preview ul, .markdown-preview ol {
+  margin-bottom: 0.75rem;
+  padding-left: 1.5rem;
+}
+
+.markdown-preview li {
+  margin-bottom: 0.25rem;
+}
+
+.markdown-preview blockquote {
+  border-left: 3px solid #3b82f6;
+  padding-left: 1rem;
+  margin: 0.75rem 0;
+  color: #64748b;
+  background-color: #f1f5f9;
+  padding: 0.5rem 1rem;
+  border-radius: 0 0.25rem 0.25rem 0;
+}
+
+.markdown-preview code {
+  background-color: #f1f5f9;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+}
+
+.markdown-preview pre {
+  background-color: #1e293b;
+  color: #f8fafc;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  margin-bottom: 0.75rem;
+}
+
+.markdown-preview pre code {
+  background-color: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+.markdown-preview a {
+  color: #3b82f6;
+  text-decoration: none;
+}
+
+.markdown-preview a:hover {
+  text-decoration: underline;
+}
+
+.markdown-preview img {
+  max-width: 100%;
+  border-radius: 0.25rem;
+}
+
+.markdown-preview hr {
+  border: none;
+  border-top: 1px solid #e2e8f0;
+  margin: 1.5rem 0;
+}
+
+.markdown-preview table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 0.75rem;
+}
+
+.markdown-preview th, .markdown-preview td {
+  border: 1px solid #e2e8f0;
+  padding: 0.5rem;
+  text-align: left;
+}
+
+.markdown-preview th {
+  background-color: #f1f5f9;
+  font-weight: 600;
+}
+
+.wiki-link {
+  color: #8b5cf6;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.wiki-link:hover {
+  color: #7c3aed;
+}
+
+.task-checkbox {
+  margin-right: 0.5rem;
+  cursor: pointer;
+}
+
+.task-completed {
+  text-decoration: line-through;
+  color: #94a3b8;
+}

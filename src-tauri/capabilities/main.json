@@ -1,0 +1,12 @@
+{
+  "identifier": "main",
+  "description": "Main window capabilities",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:path:default",
+    "core:app:default",
+    "core:event:default",
+    "core:image:default"
+  ]
+}

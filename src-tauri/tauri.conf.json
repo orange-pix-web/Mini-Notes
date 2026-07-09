@@ -1,0 +1,29 @@
+{
+  "productName": "Mini Notes",
+  "version": "0.1.0",
+  "identifier": "com.mininotes.app",
+  "build": {
+    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
+  },
+  "bundle": {
+    "active": false
+  },
+  "app": {
+    "security": {
+      "capabilities": ["main"],
+      "csp": "default-src 'self'; script-src 'self'"
+    },
+    "windows": [
+      {
+        "title": "Mini Notes",
+        "width": 1200,
+        "height": 800,
+        "center": true,
+        "resizable": true
+      }
+    ]
+  }
+}
