@@ -1,7 +1,20 @@
 use base64::engine::{general_purpose, Engine as _};
 use sha2::{Digest, Sha256};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+
+pub fn write_atomic(file_path: &Path, content: &str) -> std::io::Result<()> {
+    let temp_path = file_path.with_extension("md.tmp");
+    
+    let mut file = fs::File::create(&temp_path)?;
+    file.write_all(content.as_bytes())?;
+    file.sync_all()?;
+    
+    fs::rename(&temp_path, file_path)?;
+    
+    Ok(())
+}
 
 pub fn import_image(data_dir: &Path, _note_id: &str, base64_data: &str) -> std::io::Result<String> {
     let decoded = general_purpose::STANDARD.decode(base64_data).map_err(|e| {

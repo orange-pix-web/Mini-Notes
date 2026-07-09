@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { readTextFile } from "@tauri-apps/plugin-fs";
 import type { Note, CreateNoteRequest, UpdateNoteRequest, SearchRequest, ApiResponse } from "@/types";
 
 export async function initApp(): Promise<ApiResponse<{ data_dir: string; db_path: string }>> {
@@ -14,9 +13,13 @@ export async function getNote(id: string): Promise<ApiResponse<Note>> {
   return invoke("get_note", { id });
 }
 
-export async function getNoteContent(filePath: string): Promise<string> {
+export async function getNoteContent(relativePath: string): Promise<string> {
   try {
-    return await readTextFile(filePath);
+    const response = await invoke<ApiResponse<string>>("read_note_content", { relative_path: relativePath });
+    if (response.success && response.data) {
+      return response.data;
+    }
+    return "";
   } catch {
     return "";
   }

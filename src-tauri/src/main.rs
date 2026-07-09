@@ -107,6 +107,9 @@ fn init_app() -> ApiResponse<AppState> {
         }
     }
 
+    db::scan_and_sync_notes(&db_path, &data_dir);
+    info!("[SCAN] 文件扫描同步完成");
+
     ApiResponse {
         success: true,
         message: "应用初始化成功".to_string(),
@@ -373,6 +376,28 @@ fn import_file(note_id: String, file_path: String) -> ApiResponse<String> {
     }
 }
 
+#[command]
+fn read_note_content(relative_path: String) -> ApiResponse<String> {
+    let data_dir = get_data_dir();
+    let file_path = data_dir.join(&relative_path);
+    
+    match std::fs::read_to_string(&file_path) {
+        Ok(content) => ApiResponse {
+            success: true,
+            message: "读取成功".to_string(),
+            data: Some(content),
+        },
+        Err(e) => {
+            error!("[FILE] 读取文件失败: {}", e);
+            ApiResponse {
+                success: false,
+                message: format!("读取文件失败: {}", e),
+                data: None,
+            }
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -389,6 +414,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             toggle_pinned,
             import_image,
             import_file,
+            read_note_content,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

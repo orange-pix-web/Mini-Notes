@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+use crate::fs::write_atomic;
 use crate::types::CreateNoteRequest;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -67,6 +68,20 @@ fn get_summary(content: &str, max_len: usize) -> String {
     }
 }
 
+fn extract_title(content: &str) -> Option<String> {
+    let first_line = content.lines().next().unwrap_or("");
+    if first_line.starts_with('#') {
+        let title = first_line.trim_start_matches('#').trim();
+        if !title.is_empty() {
+            Some(title.to_string())
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
 pub fn create_note(db_path: &Path, data_dir: &Path, request: &CreateNoteRequest) -> SqlResult<Note> {
     let conn = Connection::open(db_path)?;
     let id = Uuid::new_v4().to_string();
@@ -76,11 +91,21 @@ pub fn create_note(db_path: &Path, data_dir: &Path, request: &CreateNoteRequest)
     let relative_path = PathBuf::from("Notes").join(folder).join(&file_name);
     let file_path = data_dir.join(&relative_path);
 
-    match fs::write(&file_path, &request.content) {
-        Ok(_) => (),
-        Err(e) => return Err(rusqlite::Error::QueryReturnedNoRows),
+    if let Err(e) = fs::create_dir_all(file_path.parent().unwrap_or(&file_path)) {
+        log::error!("Failed to create directory: {}", e);
+        return Err(rusqlite::Error::QueryReturnedNoRows);
     }
 
+    if let Err(e) = write_atomic(&file_path, &request.content) {
+        log::error!("Failed to write file: {}", e);
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
+
+    let title = if request.title.is_empty() {
+        extract_title(&request.content).unwrap_or_else(|| "未命名笔记".to_string())
+    } else {
+        request.title.clone()
+    };
     let summary = get_summary(&request.content, 200);
     let now = now_str();
 
@@ -90,8 +115,8 @@ pub fn create_note(db_path: &Path, data_dir: &Path, request: &CreateNoteRequest)
          RETURNING id, title, file_path, relative_path, folder, summary, is_favorite, is_pinned, status, created_at, updated_at, last_viewed_at, deleted_at",
         params![
             id,
-            request.title,
-            file_path.to_string_lossy(),
+            title,
+            relative_path.to_string_lossy(),
             relative_path.to_string_lossy(),
             folder,
             summary,
@@ -184,18 +209,19 @@ pub fn update_note(db_path: &Path, data_dir: &Path, id: &str, content: &str) -> 
     )?;
 
     let file_path = data_dir.join(&note.relative_path);
-    match fs::write(&file_path, content) {
-        Ok(_) => (),
-        Err(e) => return Err(rusqlite::Error::QueryReturnedNoRows),
+    if let Err(e) = write_atomic(&file_path, content) {
+        log::error!("Failed to write file: {}", e);
+        return Err(rusqlite::Error::QueryReturnedNoRows);
     }
 
+    let title = extract_title(content).unwrap_or_else(|| note.title.clone());
     let summary = get_summary(content, 200);
     let now = now_str();
 
     let updated_note: Note = conn.query_row(
-        "UPDATE notes SET summary = ?, updated_at = ? WHERE id = ? 
+        "UPDATE notes SET title = ?, summary = ?, updated_at = ? WHERE id = ? 
          RETURNING id, title, file_path, relative_path, folder, summary, is_favorite, is_pinned, status, created_at, updated_at, last_viewed_at, deleted_at",
-        params![summary, now, id],
+        params![title, summary, now, id],
         |row| {
             Ok(Note {
                 id: row.get(0)?,
@@ -403,4 +429,121 @@ pub fn toggle_pinned(db_path: &Path, id: &str) -> SqlResult<Note> {
     )?;
 
     Ok(updated_note)
+}
+
+pub fn scan_and_sync_notes(db_path: &Path, data_dir: &Path) {
+    let notes_dir = data_dir.join("Notes");
+    if !notes_dir.exists() {
+        return;
+    }
+
+    let conn = match Connection::open(db_path) {
+        Ok(c) => c,
+        Err(e) => {
+            log::error!("Failed to open database: {}", e);
+            return;
+        }
+    };
+
+    let folders = vec!["", "Inbox", "Projects"];
+    
+    for folder in folders {
+        let folder_path = if folder.is_empty() {
+            notes_dir.clone()
+        } else {
+            notes_dir.join(folder)
+        };
+
+        if !folder_path.exists() {
+            continue;
+        }
+
+        let entries = match fs::read_dir(&folder_path) {
+            Ok(e) => e,
+            Err(e) => {
+                log::error!("Failed to read directory {}: {}", folder_path.display(), e);
+                continue;
+            }
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if ext != "md" {
+                continue;
+            }
+
+            let file_name = path.file_stem().and_then(|n| n.to_str()).unwrap_or("");
+            if !is_valid_uuid(file_name) {
+                continue;
+            }
+
+            let id = file_name.to_string();
+            let content = match fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(e) => {
+                    log::error!("Failed to read file {}: {}", path.display(), e);
+                    continue;
+                }
+            };
+
+            let relative_path = match path.strip_prefix(data_dir) {
+                Ok(p) => p.to_string_lossy().to_string(),
+                Err(e) => {
+                    log::error!("Failed to get relative path for {}: {}", path.display(), e);
+                    continue;
+                }
+            };
+
+            let title = extract_title(&content);
+            let summary = get_summary(&content, 200);
+            let now = now_str();
+
+            let mut stmt = match conn.prepare(
+                "SELECT COUNT(*) FROM notes WHERE id = ? AND deleted_at IS NULL"
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    log::error!("Failed to prepare query: {}", e);
+                    continue;
+                }
+            };
+
+            let count: i64 = match stmt.query_row(params![&id], |row| row.get(0)) {
+                Ok(c) => c,
+                Err(_) => 0,
+            };
+
+            if count == 0 {
+                match conn.execute(
+                    "INSERT INTO notes (id, title, file_path, relative_path, folder, summary, is_favorite, is_pinned, status, created_at, updated_at) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    params![
+                        id,
+                        title,
+                        relative_path,
+                        relative_path,
+                        folder,
+                        summary,
+                        false,
+                        false,
+                        "active",
+                        now,
+                        now,
+                    ],
+                ) {
+                    Ok(_) => log::info!("Scanned and added note: {}", path.display()),
+                    Err(e) => log::error!("Failed to insert note {}: {}", path.display(), e),
+                }
+            }
+        }
+    }
+}
+
+fn is_valid_uuid(s: &str) -> bool {
+    uuid::Uuid::parse_str(s).is_ok()
 }

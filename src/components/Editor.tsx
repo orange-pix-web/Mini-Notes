@@ -20,7 +20,7 @@ function Editor({ note, onNoteUpdated, onNoteDeleted }: EditorProps) {
 
   useEffect(() => {
     if (note) {
-      loadNoteContent(note.file_path);
+      loadNoteContent(note.relative_path);
     } else {
       setContent("");
     }
