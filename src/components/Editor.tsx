@@ -1,133 +1,94 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import clsx from "clsx";
-import { getNoteContent, updateNote, deleteNote, toggleFavorite, togglePinned, importImage, importFile } from "@/api";
+import { getNoteContent, updateNote, deleteNote, toggleFavorite, togglePinned } from "@/api";
 import type { Note } from "@/types";
 
 interface EditorProps {
   note: Note | null;
   onNoteUpdated: () => void;
-  onNoteCreated: () => void;
   onNoteDeleted: () => void;
 }
 
+type SaveStatus = "saved" | "editing" | "saving" | "failed";
+
 function Editor({ note, onNoteUpdated, onNoteDeleted }: EditorProps) {
-  const [content, setContent] = useState("");
+  const [draftContent, setDraftContent] = useState("");
+  const [lastSavedContent, setLastSavedContent] = useState("");
   const [isEditing, setIsEditing] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [showProperties, setShowProperties] = useState(false);
+  const noteIdRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (note) {
-      loadNoteContent(note.relative_path);
-    } else {
-      setContent("");
-    }
-  }, [note]);
-
-  const loadNoteContent = async (filePath: string) => {
+  const loadNoteContent = useCallback(async (relativePath: string) => {
     try {
-      const fileContent = await getNoteContent(filePath);
-      setContent(fileContent || "");
+      const fileContent = await getNoteContent(relativePath);
+      if (noteIdRef.current === note?.id) {
+        setDraftContent(fileContent || "");
+        setLastSavedContent(fileContent || "");
+      }
     } catch (error) {
       console.error("Failed to load note content:", error);
-      setContent("");
     }
-  };
+  }, [note?.id]);
+
+  useEffect(() => {
+    if (note && note.id !== noteIdRef.current) {
+      noteIdRef.current = note.id;
+      loadNoteContent(note.relative_path);
+    } else if (!note) {
+      noteIdRef.current = null;
+      setDraftContent("");
+      setLastSavedContent("");
+    }
+  }, [note, loadNoteContent]);
+
+  const isDirty = draftContent !== lastSavedContent;
 
   const handleSave = useCallback(async () => {
-    if (!note) return;
-    
-    setIsSaving(true);
+    if (!note || !isDirty || saveStatus === "saving") return;
+
+    setSaveStatus("saving");
     try {
       const response = await updateNote({
         id: note.id,
-        content,
+        content: draftContent,
       });
-      
+
       if (response.success) {
+        setLastSavedContent(draftContent);
+        setSaveStatus("saved");
         onNoteUpdated();
+      } else {
+        setSaveStatus("failed");
       }
     } catch (error) {
       console.error("Failed to save note:", error);
-    } finally {
-      setIsSaving(false);
+      setSaveStatus("failed");
     }
-  }, [note, content, onNoteUpdated]);
+  }, [note, draftContent, isDirty, saveStatus, onNoteUpdated]);
 
   useEffect(() => {
-    if (!note || !content) return;
-    
+    if (!note || !isDirty) return;
+
     const debounce = setTimeout(() => {
       handleSave();
     }, 1000);
-    
+
     return () => clearTimeout(debounce);
-  }, [content, note, handleSave]);
+  }, [draftContent, note, isDirty, handleSave]);
 
-  const handlePaste = async (e: React.ClipboardEvent) => {
-    const items = e.clipboardData.items;
-    if (!items) return;
-
-    for (const item of items) {
-      if (item.type.startsWith("image/")) {
-        e.preventDefault();
-        
-        const file = item.getAsFile();
-        if (!file || !note) continue;
-
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-          const base64Data = event.target?.result as string;
-          const base64Content = base64Data.split(",")[1];
-          
-          try {
-            const response = await importImage(note.id, base64Content);
-            if (response.success && response.data) {
-              const imageLink = `![图片](${response.data})`;
-              setContent((prev) => prev + "\n\n" + imageLink);
-            }
-          } catch (error) {
-            console.error("Failed to import image:", error);
-          }
-        };
-        reader.readAsDataURL(file);
-      }
+  const handleContentChange = (value: string) => {
+    setDraftContent(value);
+    if (saveStatus === "saved") {
+      setSaveStatus("editing");
     }
-  };
-
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    
-    const files = e.dataTransfer.files;
-    if (!files || !note) return;
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const filePath = (file as unknown as { path?: string }).path;
-      
-      if (!filePath) continue;
-
-      try {
-        const response = await importFile(note.id, filePath);
-        if (response.success && response.data) {
-          const link = `[${file.name}](${response.data})`;
-          setContent((prev) => prev + "\n\n" + link);
-        }
-      } catch (error) {
-        console.error("Failed to import file:", error);
-      }
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
   };
 
   const handleToggleFavorite = async () => {
     if (!note) return;
-    
+
     try {
       const response = await toggleFavorite(note.id);
       if (response.success) {
@@ -140,7 +101,7 @@ function Editor({ note, onNoteUpdated, onNoteDeleted }: EditorProps) {
 
   const handleTogglePinned = async () => {
     if (!note) return;
-    
+
     try {
       const response = await togglePinned(note.id);
       if (response.success) {
@@ -153,7 +114,7 @@ function Editor({ note, onNoteUpdated, onNoteDeleted }: EditorProps) {
 
   const handleDelete = async () => {
     if (!note) return;
-    
+
     if (window.confirm("确定要将此笔记移至回收站吗？")) {
       try {
         const response = await deleteNote(note.id);
@@ -163,6 +124,32 @@ function Editor({ note, onNoteUpdated, onNoteDeleted }: EditorProps) {
       } catch (error) {
         console.error("Failed to delete note:", error);
       }
+    }
+  };
+
+  const getStatusText = () => {
+    switch (saveStatus) {
+      case "saved":
+        return "已保存";
+      case "editing":
+        return "编辑中";
+      case "saving":
+        return "保存中...";
+      case "failed":
+        return "保存失败";
+    }
+  };
+
+  const getStatusColor = () => {
+    switch (saveStatus) {
+      case "saved":
+        return "text-green-500";
+      case "editing":
+        return "text-yellow-500";
+      case "saving":
+        return "text-blue-500";
+      case "failed":
+        return "text-red-500";
     }
   };
 
@@ -235,9 +222,9 @@ function Editor({ note, onNoteUpdated, onNoteDeleted }: EditorProps) {
           >
             {isEditing ? "预览" : "编辑"}
           </button>
-          {isSaving && (
-            <span className="text-xs text-slate-400">保存中...</span>
-          )}
+          <span className={`text-xs ${getStatusColor()}`}>
+            {getStatusText()}
+          </span>
         </div>
       </div>
 
@@ -267,23 +254,18 @@ function Editor({ note, onNoteUpdated, onNoteDeleted }: EditorProps) {
       <div className="flex-1 overflow-hidden">
         {isEditing ? (
           <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            onPaste={handlePaste}
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-            className="w-full h-full p-4 resize-none bg-white editor-content text-slate-800"
+            value={draftContent}
+            onChange={(e) => handleContentChange(e.target.value)}
+            className="w-full h-full p-4 resize-none bg-white text-slate-800 font-mono text-sm leading-relaxed focus:outline-none"
             placeholder="开始编写你的笔记...
 
-支持 Markdown 语法
-粘贴图片自动上传
-拖拽文件添加附件
-使用 [[笔记名]] 创建双链"
+支持 Markdown 语法"
+            autoFocus
           />
         ) : (
-          <div className="w-full h-full p-4 overflow-y-auto markdown-preview bg-slate-50">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {content || "*暂无内容*"}
+          <div className="w-full h-full p-4 overflow-y-auto bg-slate-50">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} className="prose prose-sm max-w-none">
+              {draftContent || "*暂无内容*"}
             </ReactMarkdown>
           </div>
         )}

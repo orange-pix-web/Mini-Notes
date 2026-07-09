@@ -61,8 +61,9 @@ pub fn run_migrations(conn: &Connection) -> SqlResult<()> {
 
 fn get_summary(content: &str, max_len: usize) -> String {
     let text = content.replace('\n', " ").replace('\r', "");
-    if text.len() > max_len {
-        text[..max_len].to_string() + "..."
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() > max_len {
+        chars[..max_len].iter().collect::<String>() + "..."
     } else {
         text
     }

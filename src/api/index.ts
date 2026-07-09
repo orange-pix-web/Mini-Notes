@@ -5,8 +5,8 @@ export async function initApp(): Promise<ApiResponse<{ data_dir: string; db_path
   return invoke("init_app");
 }
 
-export async function createNote(request: CreateNoteRequest): Promise<ApiResponse<Note>> {
-  return invoke("create_note", { request });
+export async function createNote(request?: CreateNoteRequest): Promise<ApiResponse<Note>> {
+  return invoke("create_note", { request: request || {} });
 }
 
 export async function getNote(id: string): Promise<ApiResponse<Note>> {

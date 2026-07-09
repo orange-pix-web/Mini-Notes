@@ -1,42 +1,28 @@
-import { createNote } from "@/api";
-import type { Note } from "@/types";
+import type { Note, NavItem, NavOption } from "@/types";
+
+const navOptions: NavOption[] = [
+  { id: "all", label: "全部笔记", icon: "📝" },
+  { id: "inbox", label: "Inbox 待整理", icon: "📥" },
+  { id: "favorite", label: "收藏", icon: "⭐" },
+  { id: "tags", label: "标签", icon: "🏷️" },
+  { id: "categories", label: "分类", icon: "📁" },
+  { id: "projects", label: "项目", icon: "📋" },
+  { id: "tasks", label: "任务", icon: "✅" },
+  { id: "attachments", label: "附件", icon: "📎" },
+  { id: "trash", label: "回收站", icon: "🗑️" },
+];
 
 interface NoteListProps {
   notes: Note[];
   selectedNote: Note | null;
   onSelect: (note: Note) => void;
   isLoading: boolean;
-  searchQuery: string;
+  activeNav: NavItem;
 }
 
-function NoteList({ notes, selectedNote, onSelect, isLoading, searchQuery }: NoteListProps) {
-  const handleCreateNote = async () => {
-    const now = new Date();
-    const title = `新建笔记 ${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-    
-    try {
-      const response = await createNote({
-        title,
-        content: "",
-        folder: "Inbox",
-      });
-      
-      if (response.success && response.data) {
-        onSelect(response.data);
-      }
-    } catch (error) {
-      console.error("Failed to create note:", error);
-    }
-  };
-
-  const filteredNotes = notes.filter((note) => {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
-    return (
-      note.title.toLowerCase().includes(query) ||
-      note.summary.toLowerCase().includes(query)
-    );
-  });
+function NoteList({ notes, selectedNote, onSelect, isLoading, activeNav }: NoteListProps) {
+  const currentNav = navOptions.find((n) => n.id === activeNav);
+  const navTitle = currentNav?.label || "笔记";
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -50,16 +36,36 @@ function NoteList({ notes, selectedNote, onSelect, isLoading, searchQuery }: Not
     return date.toLocaleDateString("zh-CN");
   };
 
+  const getEmptyStateContent = () => {
+    switch (activeNav) {
+      case "inbox":
+        return { icon: "📥", title: "Inbox 为空", desc: "点击新建笔记开始" };
+      case "favorite":
+        return { icon: "⭐", title: "暂无收藏", desc: "点击笔记旁的星星收藏" };
+      case "trash":
+        return { icon: "🗑️", title: "回收站为空", desc: "已删除的笔记会显示在这里" };
+      case "tags":
+        return { icon: "🏷️", title: "暂无标签", desc: "标签功能开发中" };
+      case "categories":
+        return { icon: "📁", title: "暂无分类", desc: "分类功能开发中" };
+      case "projects":
+        return { icon: "📋", title: "暂无项目", desc: "项目功能开发中" };
+      case "tasks":
+        return { icon: "✅", title: "暂无任务", desc: "任务功能开发中" };
+      case "attachments":
+        return { icon: "📎", title: "暂无附件", desc: "附件功能开发中" };
+      default:
+        return { icon: "📝", title: "暂无笔记", desc: "点击左侧新建笔记开始" };
+    }
+  };
+
+  const emptyState = getEmptyStateContent();
+
   return (
     <div className="w-80 bg-white border-r border-slate-200 flex flex-col">
       <div className="flex items-center justify-between p-3 border-b border-slate-200">
-        <span className="text-sm font-medium text-slate-700">笔记列表</span>
-        <button
-          onClick={handleCreateNote}
-          className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
-        >
-          + 新建
-        </button>
+        <span className="text-sm font-medium text-slate-700">{navTitle}</span>
+        <span className="text-xs text-slate-400">{notes.length} 条</span>
       </div>
 
       <div className="flex-1 overflow-y-auto">
@@ -67,14 +73,15 @@ function NoteList({ notes, selectedNote, onSelect, isLoading, searchQuery }: Not
           <div className="flex items-center justify-center h-full text-slate-400">
             加载中...
           </div>
-        ) : filteredNotes.length === 0 ? (
+        ) : notes.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-slate-400">
-            <span className="text-4xl mb-2">📭</span>
-            <p className="text-sm">暂无笔记</p>
+            <span className="text-4xl mb-2">{emptyState.icon}</span>
+            <p className="text-sm font-medium text-slate-500">{emptyState.title}</p>
+            <p className="text-xs text-slate-400 mt-1">{emptyState.desc}</p>
           </div>
         ) : (
           <div className="py-2">
-            {filteredNotes.map((note) => (
+            {notes.map((note) => (
               <button
                 key={note.id}
                 onClick={() => onSelect(note)}
