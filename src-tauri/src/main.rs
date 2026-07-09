@@ -4,7 +4,7 @@
 )]
 
 use log::{info, error};
-use rusqlite::Result as SqlResult;
+use rusqlite::{Connection, Result as SqlResult};
 use std::path::{Path, PathBuf};
 use tauri::command;
 
@@ -13,7 +13,7 @@ mod fs;
 mod logger;
 mod types;
 
-use types::{ApiResponse, AppState, CreateNoteRequest, SearchRequest, UpdateNoteRequest};
+use types::{ApiResponse, AppState, CreateNoteRequest, RenameNoteRequest, SearchRequest, UpdateNoteRequest};
 use db::Note;
 
 fn get_data_dir() -> PathBuf {
@@ -122,12 +122,31 @@ fn init_app() -> ApiResponse<AppState> {
 
 #[command]
 fn create_note(request: CreateNoteRequest) -> ApiResponse<Note> {
+    info!("[NOTE] create_note command called");
+    
     let data_dir = get_data_dir();
     let db_path = data_dir.join("database").join("index.db");
     
-    match db::create_note(&db_path, &data_dir, &request) {
+    info!("[NOTE] data_dir: {}, db_path: {}", data_dir.display(), db_path.display());
+    
+    let notes_root_dir = match get_notes_root_dir(&db_path) {
+        Ok(path) => {
+            info!("[NOTE] notes_root_dir: {}", path.display());
+            path
+        }
+        Err(e) => {
+            error!("[ERROR] [NOTE] create_note failed: 获取笔记根目录失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: "获取笔记根目录失败".to_string(),
+                data: None,
+            };
+        }
+    };
+    
+    match db::create_note(&db_path, &notes_root_dir, &request) {
         Ok(note) => {
-            info!("[NOTE] 笔记创建成功: {}", note.title);
+            info!("[NOTE] create_note command success: note_id={}, title={}", note.id, note.title);
             ApiResponse {
                 success: true,
                 message: "笔记创建成功".to_string(),
@@ -135,7 +154,7 @@ fn create_note(request: CreateNoteRequest) -> ApiResponse<Note> {
             }
         }
         Err(e) => {
-            error!("[NOTE] 笔记创建失败: {}", e);
+            error!("[ERROR] [NOTE] create_note failed: {}", e);
             ApiResponse {
                 success: false,
                 message: format!("笔记创建失败: {}", e),
@@ -169,7 +188,19 @@ fn update_note(request: UpdateNoteRequest) -> ApiResponse<Note> {
     let data_dir = get_data_dir();
     let db_path = data_dir.join("database").join("index.db");
     
-    match db::update_note(&db_path, &data_dir, &request.id, &request.content) {
+    let notes_root_dir = match get_notes_root_dir(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            error!("[NOTE] 获取笔记根目录失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: "获取笔记根目录失败".to_string(),
+                data: None,
+            };
+        }
+    };
+    
+    match db::update_note(&db_path, &notes_root_dir, &request.id, &request.content) {
         Ok(note) => {
             info!("[NOTE] 笔记更新成功: {}", note.id);
             ApiResponse {
@@ -190,11 +221,13 @@ fn update_note(request: UpdateNoteRequest) -> ApiResponse<Note> {
 }
 
 #[command]
-fn list_notes(filter: String) -> ApiResponse<Vec<Note>> {
+fn list_notes(filter: String, folder: Option<String>) -> ApiResponse<Vec<Note>> {
     let data_dir = get_data_dir();
     let db_path = data_dir.join("database").join("index.db");
     
-    match db::list_notes(&db_path, &filter) {
+    let folder_str = folder.as_deref();
+    
+    match db::list_notes(&db_path, &filter, folder_str) {
         Ok(notes) => ApiResponse {
             success: true,
             message: "获取笔记列表成功".to_string(),
@@ -379,7 +412,21 @@ fn import_file(note_id: String, file_path: String) -> ApiResponse<String> {
 #[command]
 fn read_note_content(relative_path: String) -> ApiResponse<String> {
     let data_dir = get_data_dir();
-    let file_path = data_dir.join(&relative_path);
+    let db_path = data_dir.join("database").join("index.db");
+    
+    let notes_root_dir = match get_notes_root_dir(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            error!("[FILE] 获取笔记根目录失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: "获取笔记根目录失败".to_string(),
+                data: None,
+            };
+        }
+    };
+    
+    let file_path = notes_root_dir.join(&relative_path);
     
     match std::fs::read_to_string(&file_path) {
         Ok(content) => ApiResponse {
@@ -398,8 +445,223 @@ fn read_note_content(relative_path: String) -> ApiResponse<String> {
     }
 }
 
+fn get_notes_root_dir(db_path: &Path) -> SqlResult<PathBuf> {
+    let conn = Connection::open(db_path)?;
+    
+    if let Some(path_str) = db::get_setting(&conn, "notes_root_dir")? {
+        Ok(PathBuf::from(path_str))
+    } else {
+        let default = get_data_dir().join("Notes");
+        Ok(default)
+    }
+}
+
+#[command]
+fn get_workspace_info() -> ApiResponse<serde_json::Value> {
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    
+    let notes_root_dir = match get_notes_root_dir(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            error!("[WORKSPACE] 获取笔记根目录失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: "获取工作区信息失败".to_string(),
+                data: None,
+            };
+        }
+    };
+    
+    ApiResponse {
+        success: true,
+        message: "获取工作区信息成功".to_string(),
+        data: Some(serde_json::json!({
+            "data_dir": data_dir.to_string_lossy().to_string(),
+            "notes_root_dir": notes_root_dir.to_string_lossy().to_string(),
+            "database_path": db_path.to_string_lossy().to_string(),
+        })),
+    }
+}
+
+#[command]
+fn set_notes_root_dir(path: String) -> ApiResponse<serde_json::Value> {
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    
+    let dir_path = PathBuf::from(&path);
+    
+    if !dir_path.exists() {
+        return ApiResponse {
+            success: false,
+            message: "路径不存在".to_string(),
+            data: None,
+        };
+    }
+    
+    if !dir_path.is_dir() {
+        return ApiResponse {
+            success: false,
+            message: "路径不是目录".to_string(),
+            data: None,
+        };
+    }
+    
+    match std::fs::read_dir(&dir_path) {
+        Ok(_) => (),
+        Err(e) => {
+            return ApiResponse {
+                success: false,
+                message: format!("目录不可读: {}", e),
+                data: None,
+            };
+        }
+    }
+    
+    let test_file = dir_path.join(".mininotes_test");
+    match std::fs::write(&test_file, "test") {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&test_file);
+        }
+        Err(e) => {
+            return ApiResponse {
+                success: false,
+                message: format!("目录不可写: {}", e),
+                data: None,
+            };
+        }
+    }
+    
+    let conn = match Connection::open(&db_path) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("[WORKSPACE] 打开数据库失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: "打开数据库失败".to_string(),
+                data: None,
+            };
+        }
+    };
+    
+    if let Err(e) = db::set_setting(&conn, "notes_root_dir", &path) {
+        error!("[WORKSPACE] 保存设置失败: {}", e);
+        return ApiResponse {
+            success: false,
+            message: "保存设置失败".to_string(),
+            data: None,
+        };
+    }
+    
+    db::scan_and_sync_notes(&db_path, &dir_path);
+    
+    info!("[WORKSPACE] 笔记根目录已设置: {}", path);
+    
+    get_workspace_info()
+}
+
+#[command]
+fn scan_notes() -> ApiResponse<serde_json::Value> {
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    
+    let notes_root_dir = match get_notes_root_dir(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            error!("[SCAN] 获取笔记根目录失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: "获取笔记根目录失败".to_string(),
+                data: None,
+            };
+        }
+    };
+    
+    db::scan_and_sync_notes(&db_path, &notes_root_dir);
+    
+    ApiResponse {
+        success: true,
+        message: "扫描完成".to_string(),
+        data: Some(serde_json::json!({
+            "notes_root_dir": notes_root_dir.to_string_lossy().to_string(),
+        })),
+    }
+}
+
+#[command]
+fn get_file_tree() -> ApiResponse<Vec<types::FileTreeNode>> {
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    
+    let notes_root_dir = match get_notes_root_dir(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            error!("[FILE_TREE] 获取笔记根目录失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: "获取笔记根目录失败".to_string(),
+                data: None,
+            };
+        }
+    };
+    
+    match fs::get_file_tree(&notes_root_dir) {
+        Ok(tree) => ApiResponse {
+            success: true,
+            message: "获取文件树成功".to_string(),
+            data: Some(tree),
+        },
+        Err(e) => {
+            error!("[FILE_TREE] 获取文件树失败: {}", e);
+            ApiResponse {
+                success: false,
+                message: format!("获取文件树失败: {}", e),
+                data: None,
+            }
+        }
+    }
+}
+
+#[command]
+fn rename_note(request: RenameNoteRequest) -> ApiResponse<Note> {
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    
+    let notes_root_dir = match get_notes_root_dir(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            error!("[RENAME] 获取笔记根目录失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: "获取笔记根目录失败".to_string(),
+                data: None,
+            };
+        }
+    };
+    
+    match db::rename_note(&db_path, &notes_root_dir, &request.id, &request.new_title) {
+        Ok(note) => {
+            info!("[RENAME] 笔记重命名成功: {} -> {}", request.id, note.title);
+            ApiResponse {
+                success: true,
+                message: "笔记重命名成功".to_string(),
+                data: Some(note),
+            }
+        }
+        Err(e) => {
+            error!("[RENAME] 笔记重命名失败: {}", e);
+            ApiResponse {
+                success: false,
+                message: format!("笔记重命名失败: {}", e),
+                data: None,
+            }
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             init_app,
             create_note,
@@ -415,6 +677,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             import_image,
             import_file,
             read_note_content,
+            get_workspace_info,
+            set_notes_root_dir,
+            scan_notes,
+            get_file_tree,
+            rename_note,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

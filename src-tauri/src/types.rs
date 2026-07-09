@@ -7,10 +7,21 @@ pub struct AppState {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CreateNoteRequest {
     pub title: String,
     pub content: String,
     pub folder: String,
+}
+
+impl Default for CreateNoteRequest {
+    fn default() -> Self {
+        CreateNoteRequest {
+            title: String::new(),
+            content: String::new(),
+            folder: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -22,6 +33,20 @@ pub struct UpdateNoteRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SearchRequest {
     pub query: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FileTreeNode {
+    pub name: String,
+    pub relative_path: String,
+    pub node_type: String,
+    pub children: Vec<FileTreeNode>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RenameNoteRequest {
+    pub id: String,
+    pub new_title: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

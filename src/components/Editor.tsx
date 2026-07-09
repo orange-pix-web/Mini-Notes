@@ -9,16 +9,22 @@ interface EditorProps {
   note: Note | null;
   onNoteUpdated: () => void;
   onNoteDeleted: () => void;
+  onNoteRenamed: (id: string, newTitle: string) => Promise<boolean>;
 }
 
 type SaveStatus = "saved" | "editing" | "saving" | "failed";
 
-function Editor({ note, onNoteUpdated, onNoteDeleted }: EditorProps) {
+function Editor({ note, onNoteUpdated, onNoteDeleted, onNoteRenamed }: EditorProps) {
   const [draftContent, setDraftContent] = useState("");
   const [lastSavedContent, setLastSavedContent] = useState("");
   const [isEditing, setIsEditing] = useState(true);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
+  const [contentSaveStatus, setContentSaveStatus] = useState<SaveStatus>("saved");
+  const [titleSaveStatus, setTitleSaveStatus] = useState<SaveStatus>("saved");
+  const [saveError, setSaveError] = useState("");
   const [showProperties, setShowProperties] = useState(false);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [lastSavedTitle, setLastSavedTitle] = useState("");
   const noteIdRef = useRef<string | null>(null);
 
   const loadNoteContent = useCallback(async (relativePath: string) => {
@@ -36,20 +42,74 @@ function Editor({ note, onNoteUpdated, onNoteDeleted }: EditorProps) {
   useEffect(() => {
     if (note && note.id !== noteIdRef.current) {
       noteIdRef.current = note.id;
+      setDraftTitle(note.title);
+      setLastSavedTitle(note.title);
       loadNoteContent(note.relative_path);
     } else if (!note) {
       noteIdRef.current = null;
       setDraftContent("");
       setLastSavedContent("");
+      setDraftTitle("");
+      setLastSavedTitle("");
     }
   }, [note, loadNoteContent]);
 
-  const isDirty = draftContent !== lastSavedContent;
+  const handleTitleBlur = async () => {
+    if (!note) {
+      setIsEditingTitle(false);
+      return;
+    }
+    
+    const trimmed = draftTitle.trim();
+    if (!trimmed) {
+      setDraftTitle(lastSavedTitle);
+      setIsEditingTitle(false);
+      return;
+    }
+    
+    if (trimmed === lastSavedTitle) {
+      setIsEditingTitle(false);
+      return;
+    }
+    
+    setTitleSaveStatus("saving");
+    setSaveError("");
+    
+    try {
+      const success = await onNoteRenamed(note.id, trimmed);
+      if (success) {
+        setLastSavedTitle(trimmed);
+        setTitleSaveStatus("saved");
+      } else {
+        setTitleSaveStatus("failed");
+        setSaveError("重命名失败");
+        setDraftTitle(lastSavedTitle);
+      }
+    } catch (error) {
+      setTitleSaveStatus("failed");
+      setSaveError("重命名失败: 网络错误");
+      setDraftTitle(lastSavedTitle);
+    }
+    
+    setIsEditingTitle(false);
+  };
+
+  const handleTitleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleTitleBlur();
+    } else if (e.key === "Escape") {
+      setDraftTitle(note?.title || "");
+      setIsEditingTitle(false);
+    }
+  };
+
+  const isContentDirty = draftContent !== lastSavedContent;
 
   const handleSave = useCallback(async () => {
-    if (!note || !isDirty || saveStatus === "saving") return;
+    if (!note || !isContentDirty || contentSaveStatus === "saving") return;
 
-    setSaveStatus("saving");
+    setContentSaveStatus("saving");
     try {
       const response = await updateNote({
         id: note.id,
@@ -58,31 +118,34 @@ function Editor({ note, onNoteUpdated, onNoteDeleted }: EditorProps) {
 
       if (response.success) {
         setLastSavedContent(draftContent);
-        setSaveStatus("saved");
+        setContentSaveStatus("saved");
         onNoteUpdated();
       } else {
-        setSaveStatus("failed");
+        setContentSaveStatus("failed");
+        setSaveError(response.message || "保存失败");
+        console.error("Save failed:", response.message);
       }
     } catch (error) {
       console.error("Failed to save note:", error);
-      setSaveStatus("failed");
+      setContentSaveStatus("failed");
+      setSaveError("保存失败: 网络错误");
     }
-  }, [note, draftContent, isDirty, saveStatus, onNoteUpdated]);
+  }, [note, draftContent, isContentDirty, contentSaveStatus, onNoteUpdated]);
 
   useEffect(() => {
-    if (!note || !isDirty) return;
+    if (!note || !isContentDirty) return;
 
     const debounce = setTimeout(() => {
       handleSave();
     }, 1000);
 
     return () => clearTimeout(debounce);
-  }, [draftContent, note, isDirty, handleSave]);
+  }, [draftContent, note, isContentDirty, handleSave]);
 
   const handleContentChange = (value: string) => {
     setDraftContent(value);
-    if (saveStatus === "saved") {
-      setSaveStatus("editing");
+    if (contentSaveStatus === "saved") {
+      setContentSaveStatus("editing");
     }
   };
 
@@ -127,8 +190,16 @@ function Editor({ note, onNoteUpdated, onNoteDeleted }: EditorProps) {
     }
   };
 
+  const getCombinedSaveStatus = (): SaveStatus => {
+    if (contentSaveStatus === "failed" || titleSaveStatus === "failed") return "failed";
+    if (contentSaveStatus === "saving" || titleSaveStatus === "saving") return "saving";
+    if (contentSaveStatus === "editing" || titleSaveStatus === "editing") return "editing";
+    return "saved";
+  };
+
   const getStatusText = () => {
-    switch (saveStatus) {
+    const status = getCombinedSaveStatus();
+    switch (status) {
       case "saved":
         return "已保存";
       case "editing":
@@ -136,12 +207,13 @@ function Editor({ note, onNoteUpdated, onNoteDeleted }: EditorProps) {
       case "saving":
         return "保存中...";
       case "failed":
-        return "保存失败";
+        return saveError || "保存失败";
     }
   };
 
   const getStatusColor = () => {
-    switch (saveStatus) {
+    const status = getCombinedSaveStatus();
+    switch (status) {
       case "saved":
         return "text-green-500";
       case "editing":
@@ -169,9 +241,24 @@ function Editor({ note, onNoteUpdated, onNoteDeleted }: EditorProps) {
     <div className="flex-1 flex flex-col bg-white">
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-white">
         <div className="flex items-center gap-3">
-          <h2 className="text-lg font-semibold text-slate-800 truncate max-w-md">
-            {note.title}
-          </h2>
+          {isEditingTitle ? (
+            <input
+              type="text"
+              value={draftTitle}
+              onChange={(e) => setDraftTitle(e.target.value)}
+              onBlur={handleTitleBlur}
+              onKeyDown={handleTitleKeyDown}
+              className="text-lg font-semibold text-slate-800 border-b-2 border-blue-500 bg-transparent outline-none max-w-md"
+              autoFocus
+            />
+          ) : (
+            <h2 
+              className="text-lg font-semibold text-slate-800 truncate max-w-md cursor-text hover:text-blue-600"
+              onClick={() => setIsEditingTitle(true)}
+            >
+              {note.title}
+            </h2>
+          )}
           <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-500 rounded">
             {note.folder}
           </span>

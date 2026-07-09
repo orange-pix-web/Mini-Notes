@@ -1,12 +1,21 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Note, CreateNoteRequest, UpdateNoteRequest, SearchRequest, ApiResponse } from "@/types";
+import type { Note, CreateNoteRequest, UpdateNoteRequest, SearchRequest, ApiResponse, FileTreeNode, RenameNoteRequest } from "@/types";
 
 export async function initApp(): Promise<ApiResponse<{ data_dir: string; db_path: string }>> {
   return invoke("init_app");
 }
 
 export async function createNote(request?: CreateNoteRequest): Promise<ApiResponse<Note>> {
-  return invoke("create_note", { request: request || {} });
+  const payload = { request: request || {} };
+  console.log("[API] createNote invoke start", payload);
+  try {
+    const result = await invoke<ApiResponse<Note>>("create_note", payload);
+    console.log("[API] createNote invoke success", result);
+    return result;
+  } catch (error) {
+    console.error("[API] createNote invoke failed", error);
+    throw error;
+  }
 }
 
 export async function getNote(id: string): Promise<ApiResponse<Note>> {
@@ -29,8 +38,16 @@ export async function updateNote(request: UpdateNoteRequest): Promise<ApiRespons
   return invoke("update_note", { request });
 }
 
-export async function listNotes(filter: string): Promise<ApiResponse<Note[]>> {
-  return invoke("list_notes", { filter });
+export async function listNotes(filter: string, folder?: string): Promise<ApiResponse<Note[]>> {
+  return invoke("list_notes", { filter, folder });
+}
+
+export async function getFileTree(): Promise<ApiResponse<FileTreeNode[]>> {
+  return invoke("get_file_tree");
+}
+
+export async function renameNote(request: RenameNoteRequest): Promise<ApiResponse<Note>> {
+  return invoke("rename_note", { request });
 }
 
 export async function deleteNote(id: string): Promise<ApiResponse<void>> {
@@ -63,4 +80,16 @@ export async function importImage(note_id: string, base64_data: string): Promise
 
 export async function importFile(note_id: string, file_path: string): Promise<ApiResponse<string>> {
   return invoke("import_file", { note_id, file_path });
+}
+
+export async function getWorkspaceInfo(): Promise<ApiResponse<{ data_dir: string; notes_root_dir: string; database_path: string }>> {
+  return invoke("get_workspace_info");
+}
+
+export async function setNotesRootDir(path: string): Promise<ApiResponse<{ data_dir: string; notes_root_dir: string; database_path: string }>> {
+  return invoke("set_notes_root_dir", { path });
+}
+
+export async function scanNotes(): Promise<ApiResponse<{ notes_root_dir: string }>> {
+  return invoke("scan_notes");
 }

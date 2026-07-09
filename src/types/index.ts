@@ -94,10 +94,23 @@ export type NavItem =
   | "projects"
   | "tasks"
   | "attachments"
-  | "trash";
+  | "trash"
+  | "folder";
 
 export interface NavOption {
   id: NavItem;
   label: string;
   icon: string;
+}
+
+export interface FileTreeNode {
+  name: string;
+  relative_path: string;
+  node_type: string;
+  children: FileTreeNode[];
+}
+
+export interface RenameNoteRequest {
+  id: string;
+  new_title: string;
 }
