@@ -2,22 +2,37 @@ import { useState, useEffect, useCallback } from "react";
 import Sidebar from "@/components/Sidebar";
 import NoteList from "@/components/NoteList";
 import Editor from "@/components/Editor";
-import { initApp, listNotes, createNote, getWorkspaceInfo, setNotesRootDir, getFileTree, renameNote } from "@/api";
-import type { Note, NavItem, FileTreeNode } from "@/types";
+import { initApp, listNotes, createNote, createFolder, getWorkspaceInfo, setNotesRootDir, getFileTree, readFileNote, writeFileNote, renameFileNote, deleteFileNote } from "@/api";
+import type { Note, NavItem, FileTreeNode, FileNotePayload } from "@/types";
 import { open } from "@tauri-apps/plugin-dialog";
+
+console.log("[APP] App component loaded");
+console.log("[APP] readFileNote function:", typeof readFileNote);
+
+window.addEventListener('error', (e) => {
+  console.error('[APP] Global error:', e.error);
+});
+
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('[APP] Unhandled rejection:', e.reason);
+});
 
 function App() {
   const [notes, setNotes] = useState<Note[]>([]);
-  const [selectedNote, setSelectedNote] = useState<Note | null>(null);
+  const [selectedFile, setSelectedFile] = useState<FileNotePayload | null>(null);
   const [activeNav, setActiveNav] = useState<NavItem>("all");
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [fileTree, setFileTree] = useState<FileTreeNode[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isFileTreeLoading, setIsFileTreeLoading] = useState(true);
   const [notesRootDir, setNotesRootDirState] = useState("");
   const [createStatus, setCreateStatus] = useState<{
     state: "idle" | "creating" | "success" | "failed";
     message: string;
   }>({ state: "idle", message: "" });
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [showNewFolderModal, setShowNewFolderModal] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("新建文件夹");
 
   const getDbFolderName = (fileTreePath: string): string => {
     if (fileTreePath.startsWith("Notes/")) {
@@ -34,26 +49,40 @@ function App() {
       currentFolder = getDbFolderName(currentFolder);
     }
     setIsLoading(true);
+    console.log("[APP] loadNotes started, filter:", currentFilter, "folder:", currentFolder);
     try {
       const response = await listNotes(currentFilter, currentFolder);
+      console.log("[APP] listNotes response:", response);
       if (response.success && response.data) {
         setNotes(response.data);
+        console.log("[APP] notes loaded, count:", response.data.length);
+      } else {
+        console.log("[APP] listNotes failed or no data");
       }
     } catch (error) {
-      console.error("Failed to load notes:", error);
+      console.error("[APP] Failed to load notes:", error);
     } finally {
       setIsLoading(false);
+      console.log("[APP] loadNotes finished, isLoading set to false");
     }
   }, [activeNav, activeFolder]);
 
   const loadFileTree = useCallback(async () => {
+    setIsFileTreeLoading(true);
     try {
       const response = await getFileTree();
+      console.log("[APP] getFileTree response", response);
       if (response.success && response.data) {
+        console.log("[APP] fileTree loaded, count:", response.data.length);
+        console.log("[APP] fileTree data:", JSON.stringify(response.data));
         setFileTree(response.data);
+      } else {
+        console.log("[APP] getFileTree failed or no data", response);
       }
     } catch (error) {
       console.error("Failed to load file tree:", error);
+    } finally {
+      setIsFileTreeLoading(false);
     }
   }, []);
 
@@ -75,34 +104,35 @@ function App() {
   }, [loadNotes, loadFileTree]);
 
   useEffect(() => {
+    console.log("[APP] fileTree state changed:", fileTree.length, "nodes");
+  }, [fileTree]);
+
+  useEffect(() => {
     loadNotes();
   }, [activeNav, activeFolder, loadNotes]);
 
-  const handleNoteSelect = useCallback((note: Note) => {
-    setSelectedNote(note);
-  }, []);
-
-  const handleNoteSelectByPath = useCallback(async (relativePath: string) => {
-    const foundNote = notes.find(n => n.relative_path === relativePath);
-    if (foundNote) {
-      setSelectedNote(foundNote);
-      return;
-    }
-    
+  const handleOpenFile = useCallback(async (relativePath: string) => {
+    console.log("[APP] handleOpenFile START", relativePath);
     try {
-      const allNotesResponse = await listNotes("all");
-      if (allNotesResponse.success && allNotesResponse.data) {
-        const note = allNotesResponse.data.find(n => n.relative_path === relativePath);
-        if (note) {
-          setSelectedNote(note);
-        } else {
-          console.warn(`Note not found: ${relativePath}`);
+      const response = await readFileNote(relativePath);
+      console.log("[APP] readFileNote response", response);
+      if (response.success && response.data) {
+        console.log("[APP] setSelectedFile", response.data.title, response.data.relative_path);
+        setSelectedFile(response.data);
+        if (response.data.folder) {
+          setActiveNav("folder");
+          setActiveFolder(response.data.folder);
         }
+      } else {
+        console.error("[APP] readFileNote failed", response.message);
+        setSelectedFile(null);
       }
     } catch (error) {
-      console.error(`Failed to find note by path: ${relativePath}`, error);
+      console.error("[APP] Failed to read file:", error);
+      setSelectedFile(null);
     }
-  }, [notes]);
+    console.log("[APP] handleOpenFile END");
+  }, []);
 
   const handleNavChange = useCallback((nav: NavItem) => {
     setActiveNav(nav);
@@ -112,6 +142,18 @@ function App() {
   const handleFolderChange = useCallback((folder: string) => {
     setActiveNav("folder");
     setActiveFolder(folder);
+  }, []);
+
+  const handleToggleFolder = useCallback((relativePath: string) => {
+    setExpandedFolders(prev => {
+      const next = new Set(prev);
+      if (next.has(relativePath)) {
+        next.delete(relativePath);
+      } else {
+        next.add(relativePath);
+      }
+      return next;
+    });
   }, []);
 
   const handleNoteCreated = useCallback(async () => {
@@ -141,7 +183,9 @@ function App() {
         
         await loadNotes("folder", activeNav === "folder" && activeFolder ? activeFolder : "Inbox");
         await loadFileTree();
-        setSelectedNote(createdNote);
+        if (createdNote.relative_path) {
+          await handleOpenFile(createdNote.relative_path);
+        }
         
         setCreateStatus({ state: "success", message: `创建成功: ${createdNote.title}` });
         setTimeout(() => {
@@ -156,6 +200,98 @@ function App() {
       setCreateStatus({ state: "failed", message: "创建失败: 网络或系统错误" });
     }
   }, [loadNotes, loadFileTree, activeNav, activeFolder]);
+
+  const handleNewFolderClick = useCallback(() => {
+    let defaultName = "未命名";
+    
+    const findNodeByPath = (nodes: FileTreeNode[], path: string): FileTreeNode | null => {
+      for (const node of nodes) {
+        if (node.relative_path === path && node.node_type === "folder") {
+          return node;
+        }
+        const found = findNodeByPath(node.children, path);
+        if (found) return found;
+      }
+      return null;
+    };
+    
+    const parentNode = activeFolder ? findNodeByPath(fileTree, activeFolder) : null;
+    const existingNames = new Set<string>();
+    
+    if (parentNode) {
+      for (const child of parentNode.children) {
+        if (child.node_type === "folder") {
+          existingNames.add(child.name);
+        }
+      }
+    } else {
+      for (const node of fileTree) {
+        if (node.node_type === "folder") {
+          existingNames.add(node.name);
+        }
+      }
+    }
+    
+    let counter = 0;
+    while (existingNames.has(defaultName)) {
+      counter++;
+      defaultName = `未命名${counter}`;
+    }
+    
+    setNewFolderName(defaultName);
+    setShowNewFolderModal(true);
+  }, [showNewFolderModal, fileTree, activeFolder]);
+
+  const handleFolderCreated = useCallback(async () => {
+    console.log("[APP] handleFolderCreated start");
+    setShowNewFolderModal(false);
+    
+    const folderName = newFolderName.trim();
+    if (!folderName) {
+      console.log("[APP] folderName is empty, aborting");
+      return;
+    }
+    
+    setCreateStatus({ state: "creating", message: "创建中..." });
+    
+    try {
+      let parentFolder = "";
+      if (activeFolder) {
+        parentFolder = activeFolder;
+      }
+      console.log("[APP] parentFolder:", parentFolder);
+      
+      const response = await createFolder({ name: folderName, parent_folder: parentFolder });
+      console.log("[APP] createFolder response:", response);
+      
+      if (response.success && response.data) {
+        console.log("[APP] createFolder success, reloading file tree");
+        
+        await loadFileTree();
+        
+        if (parentFolder) {
+          handleFolderChange(parentFolder);
+          setExpandedFolders(prev => {
+            const next = new Set(prev);
+            next.add(parentFolder);
+            return next;
+          });
+        }
+        
+        setCreateStatus({ state: "success", message: `文件夹创建成功: ${folderName}` });
+        setTimeout(() => {
+          setCreateStatus({ state: "idle", message: "" });
+        }, 2000);
+      } else {
+        console.error("[APP] createFolder failed", response.message || "Unknown error");
+        setCreateStatus({ state: "failed", message: response.message || "创建失败" });
+      }
+    } catch (error) {
+      console.error("[APP] createFolder failed with exception", error);
+      const errorMsg = error instanceof Error ? error.message : JSON.stringify(error);
+      setCreateStatus({ state: "failed", message: `创建失败: ${errorMsg}` });
+    }
+  }, [newFolderName, loadFileTree, activeFolder, handleFolderChange]);
 
   const handleDirChange = useCallback(async () => {
     try {
@@ -180,35 +316,64 @@ function App() {
     }
   }, [loadNotes, loadFileTree]);
 
-  const handleNoteUpdated = useCallback(() => {
-    loadNotes();
-    loadFileTree();
-  }, [loadNotes, loadFileTree]);
-
-  const handleNoteDeleted = useCallback(() => {
-    setSelectedNote(null);
-    loadNotes();
-    loadFileTree();
-  }, [loadNotes, loadFileTree]);
-
-  const handleNoteRenamed = useCallback(async (noteId: string, newTitle: string): Promise<boolean> => {
+  const handleNoteDeleted = useCallback(async () => {
+    const currentFile = selectedFile;
+    if (!currentFile) return;
+    
+    console.log("[APP] handleNoteDeleted", currentFile.relative_path);
     try {
-      const response = await renameNote({ id: noteId, new_title: newTitle });
+      const response = await deleteFileNote(currentFile.relative_path);
+      if (response.success) {
+        console.log("[APP] deleteFileNote success");
+      } else {
+        console.error("[APP] deleteFileNote failed", response.message);
+      }
+    } catch (error) {
+      console.error("[APP] Failed to delete file:", error);
+    }
+    
+    setSelectedFile(null);
+    loadNotes();
+    loadFileTree();
+  }, [selectedFile, loadNotes, loadFileTree]);
+
+  const handleSaveFile = useCallback(async (relativePath: string, content: string): Promise<boolean> => {
+    console.log("[APP] handleSaveFile", relativePath);
+    try {
+      const response = await writeFileNote(relativePath, content);
       if (response.success && response.data) {
-        console.log("[APP] renameNote success", response.data);
-        setSelectedNote(response.data);
-        await loadNotes();
+        console.log("[APP] writeFileNote success");
+        setSelectedFile(response.data);
         await loadFileTree();
         return true;
       } else {
-        console.error("[APP] renameNote failed", response.message);
+        console.error("[APP] writeFileNote failed", response.message);
         return false;
       }
     } catch (error) {
-      console.error("[APP] Failed to rename note:", error);
+      console.error("[APP] Failed to save file:", error);
       return false;
     }
-  }, [loadNotes, loadFileTree]);
+  }, [loadFileTree]);
+
+  const handleRenameFile = useCallback(async (relativePath: string, newTitle: string): Promise<FileNotePayload | null> => {
+    console.log("[APP] handleRenameFile", relativePath, newTitle);
+    try {
+      const response = await renameFileNote(relativePath, newTitle);
+      if (response.success && response.data) {
+        console.log("[APP] renameFileNote success", response.data);
+        setSelectedFile(response.data);
+        await loadFileTree();
+        return response.data;
+      } else {
+        console.error("[APP] renameFileNote failed", response.message);
+        return null;
+      }
+    } catch (error) {
+      console.error("[APP] Failed to rename file:", error);
+      return null;
+    }
+  }, [loadFileTree]);
 
   const getCurrentFolderName = useCallback(() => {
     if (activeNav === "folder" && activeFolder) {
@@ -236,27 +401,34 @@ function App() {
         activeFolder={activeFolder}
         onNavChange={handleNavChange}
         onNewNote={handleNoteCreated}
+        onNewFolder={handleNewFolderClick}
         currentDir={notesRootDir}
         onDirChange={handleDirChange}
         createStatus={createStatus}
+        showNewFolderModal={showNewFolderModal}
+        newFolderName={newFolderName}
+        onNewFolderNameChange={setNewFolderName}
+        onNewFolderConfirm={handleFolderCreated}
+        onNewFolderCancel={() => setShowNewFolderModal(false)}
       />
       <NoteList 
         notes={notes}
-        selectedNote={selectedNote}
-        onSelect={handleNoteSelect}
-        isLoading={isLoading}
+        selectedRelativePath={selectedFile?.relative_path || null}
+        isLoading={isLoading || isFileTreeLoading}
         activeNav={activeNav}
         folderName={getCurrentFolderName()}
         fileTree={fileTree}
         activeFolder={activeFolder}
         onFolderChange={handleFolderChange}
-        onNoteSelectByPath={handleNoteSelectByPath}
+        onOpenFile={handleOpenFile}
+        expandedFolders={expandedFolders}
+        onToggleFolder={handleToggleFolder}
       />
       <Editor 
-        note={selectedNote}
-        onNoteUpdated={handleNoteUpdated}
-        onNoteDeleted={handleNoteDeleted}
-        onNoteRenamed={handleNoteRenamed}
+        file={selectedFile}
+        onSaveFile={handleSaveFile}
+        onDeleteFile={handleNoteDeleted}
+        onRenameFile={handleRenameFile}
       />
     </div>
   );

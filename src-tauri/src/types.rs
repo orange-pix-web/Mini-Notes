@@ -25,6 +25,23 @@ impl Default for CreateNoteRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(default)]
+#[allow(dead_code)]
+pub struct CreateFolderRequest {
+    pub name: String,
+    pub parent_folder: String,
+}
+
+impl Default for CreateFolderRequest {
+    fn default() -> Self {
+        CreateFolderRequest {
+            name: String::new(),
+            parent_folder: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct UpdateNoteRequest {
     pub id: String,
     pub content: String,
@@ -54,4 +71,12 @@ pub struct ApiResponse<T> {
     pub success: bool,
     pub message: String,
     pub data: Option<T>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FileNotePayload {
+    pub title: String,
+    pub relative_path: String,
+    pub folder: String,
+    pub content: String,
 }

@@ -118,35 +118,71 @@ pub fn create_note(db_path: &Path, data_dir: &Path, request: &CreateNoteRequest)
     let id = Uuid::new_v4().to_string();
     
     let folder = if request.folder.is_empty() { "Inbox" } else { &request.folder };
-    let file_name = format!("{}.md", id);
-    let relative_path = PathBuf::from("Notes").join(folder).join(&file_name);
+    let folder_path = data_dir.join(folder);
+    
+    if let Err(e) = fs::create_dir_all(&folder_path) {
+        log::error!("[ERROR] [NOTE] create_note failed: 创建目录失败: {}", e);
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
+    
+    let mut existing_indices = std::collections::HashSet::new();
+    let mut has_unnamed = false;
+    if let Ok(entries) = fs::read_dir(&folder_path) {
+        for entry in entries.flatten() {
+            if let Some(file_name) = entry.file_name().to_str() {
+                if file_name.starts_with("未命名") && file_name.ends_with(".md") {
+                    let base = &file_name[0..file_name.len() - 3];
+                    if base == "未命名" {
+                        has_unnamed = true;
+                    } else if let Some(index_str) = base.strip_prefix("未命名") {
+                        if let Ok(index) = index_str.parse::<i32>() {
+                            existing_indices.insert(index);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    let next_index = if !has_unnamed {
+        0
+    } else {
+        let mut index = 1;
+        while existing_indices.contains(&index) {
+            index += 1;
+        }
+        index
+    };
+    
+    let (file_name, title) = if next_index == 0 {
+        ("未命名.md".to_string(), "未命名".to_string())
+    } else {
+        (format!("未命名{}.md", next_index), format!("未命名{}", next_index))
+    };
+    
+    let relative_path = PathBuf::from(folder).join(&file_name);
     let file_path = data_dir.join(&relative_path);
 
     log::info!("[NOTE] create note file start: {}", file_path.display());
 
-    if let Err(e) = fs::create_dir_all(file_path.parent().unwrap_or(&file_path)) {
-        log::error!("[ERROR] [NOTE] create_note failed: 创建目录失败: {}", e);
-        return Err(rusqlite::Error::QueryReturnedNoRows);
-    }
-
     let content = if request.content.is_empty() {
-        "# 新建笔记\n\n"
+        format!("# {}\n\n", title)
     } else {
-        &request.content
+        request.content.clone()
     };
 
-    if let Err(e) = write_atomic(&file_path, content) {
+    if let Err(e) = write_atomic(&file_path, &content) {
         log::error!("[ERROR] [NOTE] create_note failed: 写入文件失败: {}", e);
         return Err(rusqlite::Error::QueryReturnedNoRows);
     }
     log::info!("[NOTE] create note file success: {}", file_path.display());
 
     let title = if request.title.is_empty() {
-        extract_title(content).unwrap_or_else(|| "未命名笔记".to_string())
+        extract_title(&content).unwrap_or_else(|| "未命名笔记".to_string())
     } else {
         request.title.clone()
     };
-    let summary = get_summary(content, 200);
+    let summary = get_summary(&content, 200);
     let now = now_str();
 
     log::info!("[NOTE] insert note db start");
@@ -436,6 +472,17 @@ pub fn delete_note(db_path: &Path, id: &str) -> SqlResult<()> {
     Ok(())
 }
 
+pub fn delete_note_by_path(db_path: &Path, relative_path: &str) -> SqlResult<()> {
+    let conn = Connection::open(db_path)?;
+    
+    conn.execute(
+        "UPDATE notes SET deleted_at = ?, status = 'deleted' WHERE relative_path = ?",
+        params![now_str(), relative_path],
+    )?;
+
+    Ok(())
+}
+
 pub fn search_notes(db_path: &Path, query: &str) -> SqlResult<Vec<Note>> {
     let conn = Connection::open(db_path)?;
     
@@ -643,7 +690,7 @@ pub fn scan_and_sync_notes(db_path: &Path, data_dir: &Path) {
                 }
             };
 
-            let title = extract_title(&content);
+            let title = extract_title(&content).unwrap_or_else(|| file_name.to_string());
             let summary = get_summary(&content, 200);
             let now = now_str();
 

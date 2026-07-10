@@ -2,19 +2,19 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import clsx from "clsx";
-import { getNoteContent, updateNote, deleteNote, toggleFavorite, togglePinned } from "@/api";
-import type { Note } from "@/types";
+import {} from "@/api";
+import type { FileNotePayload } from "@/types";
 
 interface EditorProps {
-  note: Note | null;
-  onNoteUpdated: () => void;
-  onNoteDeleted: () => void;
-  onNoteRenamed: (id: string, newTitle: string) => Promise<boolean>;
+  file: FileNotePayload | null;
+  onSaveFile: (relativePath: string, content: string) => Promise<boolean>;
+  onDeleteFile: () => void;
+  onRenameFile: (relativePath: string, newTitle: string) => Promise<FileNotePayload | null>;
 }
 
 type SaveStatus = "saved" | "editing" | "saving" | "failed";
 
-function Editor({ note, onNoteUpdated, onNoteDeleted, onNoteRenamed }: EditorProps) {
+function Editor({ file, onSaveFile, onDeleteFile, onRenameFile }: EditorProps) {
   const [draftContent, setDraftContent] = useState("");
   const [lastSavedContent, setLastSavedContent] = useState("");
   const [isEditing, setIsEditing] = useState(true);
@@ -25,37 +25,27 @@ function Editor({ note, onNoteUpdated, onNoteDeleted, onNoteRenamed }: EditorPro
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
   const [lastSavedTitle, setLastSavedTitle] = useState("");
-  const noteIdRef = useRef<string | null>(null);
-
-  const loadNoteContent = useCallback(async (relativePath: string) => {
-    try {
-      const fileContent = await getNoteContent(relativePath);
-      if (noteIdRef.current === note?.id) {
-        setDraftContent(fileContent || "");
-        setLastSavedContent(fileContent || "");
-      }
-    } catch (error) {
-      console.error("Failed to load note content:", error);
-    }
-  }, [note?.id]);
+  const fileRef = useRef<FileNotePayload | null>(null);
 
   useEffect(() => {
-    if (note && note.id !== noteIdRef.current) {
-      noteIdRef.current = note.id;
-      setDraftTitle(note.title);
-      setLastSavedTitle(note.title);
-      loadNoteContent(note.relative_path);
-    } else if (!note) {
-      noteIdRef.current = null;
+    console.log("[EDITOR] file prop changed", file?.relative_path);
+    if (file && file.relative_path !== fileRef.current?.relative_path) {
+      fileRef.current = file;
+      setDraftTitle(file.title);
+      setLastSavedTitle(file.title);
+      setDraftContent(file.content);
+      setLastSavedContent(file.content);
+    } else if (!file) {
+      fileRef.current = null;
       setDraftContent("");
       setLastSavedContent("");
       setDraftTitle("");
       setLastSavedTitle("");
     }
-  }, [note, loadNoteContent]);
+  }, [file]);
 
   const handleTitleBlur = async () => {
-    if (!note) {
+    if (!file) {
       setIsEditingTitle(false);
       return;
     }
@@ -76,9 +66,9 @@ function Editor({ note, onNoteUpdated, onNoteDeleted, onNoteRenamed }: EditorPro
     setSaveError("");
     
     try {
-      const success = await onNoteRenamed(note.id, trimmed);
-      if (success) {
-        setLastSavedTitle(trimmed);
+      const result = await onRenameFile(file.relative_path, trimmed);
+      if (result) {
+        setLastSavedTitle(result.title);
         setTitleSaveStatus("saved");
       } else {
         setTitleSaveStatus("failed");
@@ -99,7 +89,7 @@ function Editor({ note, onNoteUpdated, onNoteDeleted, onNoteRenamed }: EditorPro
       e.preventDefault();
       handleTitleBlur();
     } else if (e.key === "Escape") {
-      setDraftTitle(note?.title || "");
+      setDraftTitle(file?.title || "");
       setIsEditingTitle(false);
     }
   };
@@ -107,40 +97,35 @@ function Editor({ note, onNoteUpdated, onNoteDeleted, onNoteRenamed }: EditorPro
   const isContentDirty = draftContent !== lastSavedContent;
 
   const handleSave = useCallback(async () => {
-    if (!note || !isContentDirty || contentSaveStatus === "saving") return;
+    if (!file || !isContentDirty || contentSaveStatus === "saving") return;
 
     setContentSaveStatus("saving");
     try {
-      const response = await updateNote({
-        id: note.id,
-        content: draftContent,
-      });
-
-      if (response.success) {
+      const success = await onSaveFile(file.relative_path, draftContent);
+      if (success) {
         setLastSavedContent(draftContent);
         setContentSaveStatus("saved");
-        onNoteUpdated();
       } else {
         setContentSaveStatus("failed");
-        setSaveError(response.message || "保存失败");
-        console.error("Save failed:", response.message);
+        setSaveError("保存失败");
+        console.error("Save failed");
       }
     } catch (error) {
-      console.error("Failed to save note:", error);
+      console.error("Failed to save file:", error);
       setContentSaveStatus("failed");
       setSaveError("保存失败: 网络错误");
     }
-  }, [note, draftContent, isContentDirty, contentSaveStatus, onNoteUpdated]);
+  }, [file, draftContent, isContentDirty, contentSaveStatus, onSaveFile]);
 
   useEffect(() => {
-    if (!note || !isContentDirty) return;
+    if (!file || !isContentDirty) return;
 
     const debounce = setTimeout(() => {
       handleSave();
     }, 1000);
 
     return () => clearTimeout(debounce);
-  }, [draftContent, note, isContentDirty, handleSave]);
+  }, [draftContent, file, isContentDirty, handleSave]);
 
   const handleContentChange = (value: string) => {
     setDraftContent(value);
@@ -149,44 +134,11 @@ function Editor({ note, onNoteUpdated, onNoteDeleted, onNoteRenamed }: EditorPro
     }
   };
 
-  const handleToggleFavorite = async () => {
-    if (!note) return;
-
-    try {
-      const response = await toggleFavorite(note.id);
-      if (response.success) {
-        onNoteUpdated();
-      }
-    } catch (error) {
-      console.error("Failed to toggle favorite:", error);
-    }
-  };
-
-  const handleTogglePinned = async () => {
-    if (!note) return;
-
-    try {
-      const response = await togglePinned(note.id);
-      if (response.success) {
-        onNoteUpdated();
-      }
-    } catch (error) {
-      console.error("Failed to toggle pinned:", error);
-    }
-  };
-
   const handleDelete = async () => {
-    if (!note) return;
+    if (!file) return;
 
-    if (window.confirm("确定要将此笔记移至回收站吗？")) {
-      try {
-        const response = await deleteNote(note.id);
-        if (response.success) {
-          onNoteDeleted();
-        }
-      } catch (error) {
-        console.error("Failed to delete note:", error);
-      }
+    if (window.confirm("确定要删除此文件吗？")) {
+      onDeleteFile();
     }
   };
 
@@ -225,20 +177,20 @@ function Editor({ note, onNoteUpdated, onNoteDeleted, onNoteRenamed }: EditorPro
     }
   };
 
-  if (!note) {
+  if (!file) {
     return (
       <div className="flex-1 flex items-center justify-center bg-slate-50">
         <div className="text-center text-slate-400">
           <span className="text-6xl mb-4 block">📝</span>
           <p className="text-lg">选择或新建笔记</p>
-          <p className="text-sm mt-2">在左侧列表中点击笔记进行编辑</p>
+          <p className="text-sm mt-2">在左侧文件树中点击笔记进行编辑</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-white">
+    <div className="w-[400px] flex flex-col bg-white">
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-white">
         <div className="flex items-center gap-3">
           {isEditingTitle ? (
@@ -256,35 +208,15 @@ function Editor({ note, onNoteUpdated, onNoteDeleted, onNoteRenamed }: EditorPro
               className="text-lg font-semibold text-slate-800 truncate max-w-md cursor-text hover:text-blue-600"
               onClick={() => setIsEditingTitle(true)}
             >
-              {note.title}
+              {draftTitle}
             </h2>
           )}
           <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-500 rounded">
-            {note.folder}
+            {file.folder}
           </span>
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleToggleFavorite}
-            className={clsx(
-              "p-2 rounded-lg transition-colors",
-              note.is_favorite ? "text-yellow-500 bg-yellow-50" : "text-slate-400 hover:bg-slate-100"
-            )}
-            title="收藏"
-          >
-            ⭐
-          </button>
-          <button
-            onClick={handleTogglePinned}
-            className={clsx(
-              "p-2 rounded-lg transition-colors",
-              note.is_pinned ? "text-blue-500 bg-blue-50" : "text-slate-400 hover:bg-slate-100"
-            )}
-            title="置顶"
-          >
-            📌
-          </button>
           <button
             onClick={() => setShowProperties(!showProperties)}
             className="p-2 text-slate-400 hover:bg-slate-100 rounded-lg transition-colors"
@@ -319,20 +251,20 @@ function Editor({ note, onNoteUpdated, onNoteDeleted, onNoteRenamed }: EditorPro
         <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
           <div className="grid grid-cols-4 gap-4 text-xs">
             <div>
-              <span className="text-slate-500">创建时间</span>
-              <div className="text-slate-700">{new Date(note.created_at).toLocaleString("zh-CN")}</div>
-            </div>
-            <div>
-              <span className="text-slate-500">更新时间</span>
-              <div className="text-slate-700">{new Date(note.updated_at).toLocaleString("zh-CN")}</div>
-            </div>
-            <div>
-              <span className="text-slate-500">状态</span>
-              <div className="text-slate-700">{note.status}</div>
+              <span className="text-slate-500">文件夹</span>
+              <div className="text-slate-700">{file.folder}</div>
             </div>
             <div>
               <span className="text-slate-500">文件路径</span>
-              <div className="text-slate-700 truncate">{note.relative_path}</div>
+              <div className="text-slate-700 truncate">{file.relative_path}</div>
+            </div>
+            <div>
+              <span className="text-slate-500">标题</span>
+              <div className="text-slate-700">{file.title}</div>
+            </div>
+            <div>
+              <span className="text-slate-500">内容长度</span>
+              <div className="text-slate-700">{file.content.length} 字符</div>
             </div>
           </div>
         </div>

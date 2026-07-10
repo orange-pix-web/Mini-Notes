@@ -13,7 +13,7 @@ mod fs;
 mod logger;
 mod types;
 
-use types::{ApiResponse, AppState, CreateNoteRequest, RenameNoteRequest, SearchRequest, UpdateNoteRequest};
+use types::{ApiResponse, AppState, CreateFolderRequest, CreateNoteRequest, FileNotePayload, RenameNoteRequest, SearchRequest, UpdateNoteRequest};
 use db::Note;
 
 fn get_data_dir() -> PathBuf {
@@ -158,6 +158,65 @@ fn create_note(request: CreateNoteRequest) -> ApiResponse<Note> {
             ApiResponse {
                 success: false,
                 message: format!("笔记创建失败: {}", e),
+                data: None,
+            }
+        }
+    }
+}
+
+#[command]
+fn create_folder(name: String, parent_folder: String) -> ApiResponse<String> {
+    info!("[FOLDER] create_folder command called: name={}, parent_folder={}", name, parent_folder);
+    
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    
+    info!("[FOLDER] data_dir: {}, db_path: {}", data_dir.display(), db_path.display());
+    
+    let notes_root_dir = match get_notes_root_dir(&db_path) {
+        Ok(path) => {
+            info!("[FOLDER] notes_root_dir: {}", path.display());
+            path
+        }
+        Err(e) => {
+            error!("[ERROR] [FOLDER] create_folder failed: 获取笔记根目录失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: "获取笔记根目录失败".to_string(),
+                data: None,
+            };
+        }
+    };
+    
+    let folder_path = if parent_folder.is_empty() {
+        notes_root_dir.join(&name)
+    } else {
+        notes_root_dir.join(&parent_folder).join(&name)
+    };
+    
+    info!("[FOLDER] folder_path: {}", folder_path.display());
+    info!("[FOLDER] folder_path exists before create: {}", folder_path.exists());
+    
+    match std::fs::create_dir_all(&folder_path) {
+        Ok(_) => {
+            info!("[FOLDER] create_folder command success: {}", folder_path.display());
+            info!("[FOLDER] folder_path exists after create: {}", folder_path.exists());
+            let relative_path = if parent_folder.is_empty() {
+                name.clone()
+            } else {
+                format!("{}/{}", parent_folder, name)
+            };
+            ApiResponse {
+                success: true,
+                message: "文件夹创建成功".to_string(),
+                data: Some(relative_path),
+            }
+        }
+        Err(e) => {
+            error!("[ERROR] [FOLDER] create_folder failed: {}", e);
+            ApiResponse {
+                success: false,
+                message: format!("文件夹创建失败: {}", e),
                 data: None,
             }
         }
@@ -445,6 +504,378 @@ fn read_note_content(relative_path: String) -> ApiResponse<String> {
     }
 }
 
+#[command]
+fn read_file_note(relative_path: String) -> ApiResponse<FileNotePayload> {
+    info!("[FILE] read_file_note relative_path={}", relative_path);
+    
+    if relative_path.starts_with('/') || relative_path.starts_with('\\') {
+        error!("[FILE] 拒绝绝对路径");
+        return ApiResponse {
+            success: false,
+            message: "拒绝绝对路径".to_string(),
+            data: None,
+        };
+    }
+    
+    if relative_path.contains("..") {
+        error!("[FILE] 路径包含非法字符");
+        return ApiResponse {
+            success: false,
+            message: "路径包含非法字符".to_string(),
+            data: None,
+        };
+    }
+    
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    
+    let notes_root_dir = match get_notes_root_dir(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            error!("[FILE] 获取笔记根目录失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: "获取笔记根目录失败".to_string(),
+                data: None,
+            };
+        }
+    };
+    
+    let mut full_path = notes_root_dir.join(&relative_path);
+    
+    if !full_path.exists() {
+        info!("[FILE] 文件不存在，尝试添加 Notes 前缀: {}", full_path.display());
+        let alt_path = notes_root_dir.join("Notes").join(&relative_path);
+        if alt_path.exists() {
+            full_path = alt_path;
+        } else {
+            error!("[FILE] 文件不存在: {}", full_path.display());
+            return ApiResponse {
+                success: false,
+                message: "文件不存在".to_string(),
+                data: None,
+            };
+        }
+    }
+    
+    let content = match std::fs::read_to_string(&full_path) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("[FILE] 读取文件失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: format!("读取文件失败: {}", e),
+                data: None,
+            };
+        }
+    };
+    
+    let folder = full_path.parent()
+        .map(|p| p.strip_prefix(&notes_root_dir).unwrap_or(p).to_string_lossy().to_string())
+        .unwrap_or_default();
+    
+    let title = content.lines().next()
+        .and_then(|line| {
+            if line.starts_with("# ") {
+                Some(line[2..].trim().to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| {
+            full_path.file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default()
+        });
+    
+    ApiResponse {
+        success: true,
+        message: "读取成功".to_string(),
+        data: Some(FileNotePayload {
+            title,
+            relative_path,
+            folder,
+            content,
+        }),
+    }
+}
+
+#[command]
+fn write_file_note(relative_path: String, content: String) -> ApiResponse<FileNotePayload> {
+    info!("[FILE] write_file_note relative_path={}", relative_path);
+    
+    if relative_path.starts_with('/') || relative_path.starts_with('\\') {
+        error!("[FILE] 拒绝绝对路径");
+        return ApiResponse {
+            success: false,
+            message: "拒绝绝对路径".to_string(),
+            data: None,
+        };
+    }
+    
+    if relative_path.contains("..") {
+        error!("[FILE] 路径包含非法字符");
+        return ApiResponse {
+            success: false,
+            message: "路径包含非法字符".to_string(),
+            data: None,
+        };
+    }
+    
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    
+    let notes_root_dir = match get_notes_root_dir(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            error!("[FILE] 获取笔记根目录失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: "获取笔记根目录失败".to_string(),
+                data: None,
+            };
+        }
+    };
+    
+    let full_path = notes_root_dir.join(&relative_path);
+    
+    if let Some(parent) = full_path.parent() {
+        if !parent.exists() {
+            match std::fs::create_dir_all(parent) {
+                Ok(_) => info!("[FILE] 创建目录: {}", parent.display()),
+                Err(e) => {
+                    error!("[FILE] 创建目录失败: {}", e);
+                    return ApiResponse {
+                        success: false,
+                        message: format!("创建目录失败: {}", e),
+                        data: None,
+                    };
+                }
+            }
+        }
+    }
+    
+    match std::fs::write(&full_path, &content) {
+        Ok(_) => {
+            info!("[FILE] 文件写入成功: {}", full_path.display());
+            
+            let folder = full_path.parent()
+                .map(|p| p.strip_prefix(&notes_root_dir).unwrap_or(p).to_string_lossy().to_string())
+                .unwrap_or_default();
+            
+            let title = content.lines().next()
+                .and_then(|line| {
+                    if line.starts_with("# ") {
+                        Some(line[2..].trim().to_string())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| {
+                    full_path.file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default()
+                });
+            
+            ApiResponse {
+                success: true,
+                message: "写入成功".to_string(),
+                data: Some(FileNotePayload {
+                    title,
+                    relative_path,
+                    folder,
+                    content,
+                }),
+            }
+        }
+        Err(e) => {
+            error!("[FILE] 文件写入失败: {}", e);
+            ApiResponse {
+                success: false,
+                message: format!("文件写入失败: {}", e),
+                data: None,
+            }
+        }
+    }
+}
+
+#[command]
+fn rename_file_note(relative_path: String, new_title: String) -> ApiResponse<FileNotePayload> {
+    info!("[FILE] rename_file_note relative_path={}, new_title={}", relative_path, new_title);
+    
+    if relative_path.starts_with('/') || relative_path.starts_with('\\') {
+        error!("[FILE] 拒绝绝对路径");
+        return ApiResponse {
+            success: false,
+            message: "拒绝绝对路径".to_string(),
+            data: None,
+        };
+    }
+    
+    if relative_path.contains("..") {
+        error!("[FILE] 路径包含非法字符");
+        return ApiResponse {
+            success: false,
+            message: "路径包含非法字符".to_string(),
+            data: None,
+        };
+    }
+    
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    
+    let notes_root_dir = match get_notes_root_dir(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            error!("[FILE] 获取笔记根目录失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: "获取笔记根目录失败".to_string(),
+                data: None,
+            };
+        }
+    };
+    
+    let old_full_path = notes_root_dir.join(&relative_path);
+    
+    if !old_full_path.exists() {
+        error!("[FILE] 文件不存在: {}", old_full_path.display());
+        return ApiResponse {
+            success: false,
+            message: "文件不存在".to_string(),
+            data: None,
+        };
+    }
+    
+    let folder_path = old_full_path.parent().unwrap_or(&notes_root_dir);
+    let folder = folder_path.strip_prefix(&notes_root_dir).unwrap_or(folder_path).to_string_lossy().to_string();
+    
+    let sanitized_title: String = new_title.chars().filter(|c| {
+        !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+    }).collect();
+    
+    let mut new_file_name = format!("{}.md", sanitized_title.trim());
+    let mut new_full_path = folder_path.join(&new_file_name);
+    
+    let mut counter = 1;
+    while new_full_path.exists() && new_full_path != old_full_path {
+        new_file_name = format!("{}_{}.md", sanitized_title.trim(), counter);
+        new_full_path = folder_path.join(&new_file_name);
+        counter += 1;
+    }
+    
+    match std::fs::rename(&old_full_path, &new_full_path) {
+        Ok(_) => {
+            info!("[FILE] 文件重命名成功: {} -> {}", old_full_path.display(), new_full_path.display());
+            
+            let new_relative_path = new_full_path.strip_prefix(&notes_root_dir)
+                .unwrap_or(&new_full_path).to_string_lossy().to_string();
+            
+            let content = match std::fs::read_to_string(&new_full_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    error!("[FILE] 读取重命名后文件失败: {}", e);
+                    return ApiResponse {
+                        success: false,
+                        message: format!("读取重命名后文件失败: {}", e),
+                        data: None,
+                    };
+                }
+            };
+            
+            ApiResponse {
+                success: true,
+                message: "重命名成功".to_string(),
+                data: Some(FileNotePayload {
+                    title: sanitized_title.trim().to_string(),
+                    relative_path: new_relative_path,
+                    folder,
+                    content,
+                }),
+            }
+        }
+        Err(e) => {
+            error!("[FILE] 文件重命名失败: {}", e);
+            ApiResponse {
+                success: false,
+                message: format!("文件重命名失败: {}", e),
+                data: None,
+            }
+        }
+    }
+}
+
+#[command]
+fn delete_file_note(relative_path: String) -> ApiResponse<()> {
+    info!("[FILE] delete_file_note relative_path={}", relative_path);
+    
+    if relative_path.starts_with('/') || relative_path.starts_with('\\') {
+        error!("[FILE] 拒绝绝对路径");
+        return ApiResponse {
+            success: false,
+            message: "拒绝绝对路径".to_string(),
+            data: None,
+        };
+    }
+    
+    if relative_path.contains("..") {
+        error!("[FILE] 路径包含非法字符");
+        return ApiResponse {
+            success: false,
+            message: "路径包含非法字符".to_string(),
+            data: None,
+        };
+    }
+    
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    
+    let notes_root_dir = match get_notes_root_dir(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            error!("[FILE] 获取笔记根目录失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: "获取笔记根目录失败".to_string(),
+                data: None,
+            };
+        }
+    };
+    
+    let full_path = notes_root_dir.join(&relative_path);
+    
+    if !full_path.exists() {
+        error!("[FILE] 文件不存在: {}", full_path.display());
+        return ApiResponse {
+            success: false,
+            message: "文件不存在".to_string(),
+            data: None,
+        };
+    }
+    
+    match std::fs::remove_file(&full_path) {
+        Ok(_) => {
+            info!("[FILE] 文件删除成功: {}", full_path.display());
+            
+            let _ = db::delete_note_by_path(&db_path, &relative_path);
+            
+            ApiResponse {
+                success: true,
+                message: "删除成功".to_string(),
+                data: Some(()),
+            }
+        }
+        Err(e) => {
+            error!("[FILE] 文件删除失败: {}", e);
+            ApiResponse {
+                success: false,
+                message: format!("文件删除失败: {}", e),
+                data: None,
+            }
+        }
+    }
+}
+
 fn get_notes_root_dir(db_path: &Path) -> SqlResult<PathBuf> {
     let conn = Connection::open(db_path)?;
     
@@ -590,6 +1021,7 @@ fn scan_notes() -> ApiResponse<serde_json::Value> {
 
 #[command]
 fn get_file_tree() -> ApiResponse<Vec<types::FileTreeNode>> {
+    info!("[FILE_TREE] get_file_tree command called");
     let data_dir = get_data_dir();
     let db_path = data_dir.join("database").join("index.db");
     
@@ -665,6 +1097,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .invoke_handler(tauri::generate_handler![
             init_app,
             create_note,
+            create_folder,
             get_note,
             update_note,
             list_notes,
@@ -677,6 +1110,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             import_image,
             import_file,
             read_note_content,
+            read_file_note,
+            write_file_note,
+            rename_file_note,
+            delete_file_note,
             get_workspace_info,
             set_notes_root_dir,
             scan_notes,

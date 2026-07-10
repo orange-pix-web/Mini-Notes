@@ -20,6 +20,11 @@ export interface CreateNoteRequest {
   folder: string;
 }
 
+export interface CreateFolderRequest {
+  name: string;
+  parent_folder: string;
+}
+
 export interface UpdateNoteRequest {
   id: string;
   content: string;
@@ -113,4 +118,11 @@ export interface FileTreeNode {
 export interface RenameNoteRequest {
   id: string;
   new_title: string;
+}
+
+export interface FileNotePayload {
+  title: string;
+  relative_path: string;
+  folder: string;
+  content: string;
 }

@@ -7,8 +7,9 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 pub fn get_file_tree(root_dir: &Path) -> std::io::Result<Vec<crate::types::FileTreeNode>> {
-    let mut tree: Vec<crate::types::FileTreeNode> = Vec::new();
-    let mut folders: HashMap<String, Vec<crate::types::FileTreeNode>> = HashMap::new();
+    let mut folder_nodes: HashMap<String, crate::types::FileTreeNode> = HashMap::new();
+    let mut files: HashMap<String, Vec<crate::types::FileTreeNode>> = HashMap::new();
+    let mut all_folder_paths: Vec<String> = Vec::new();
     
     for entry in WalkDir::new(root_dir)
         .follow_links(false)
@@ -30,7 +31,14 @@ pub fn get_file_tree(root_dir: &Path) -> std::io::Result<Vec<crate::types::FileT
         let rel_path_str = relative_path.to_string_lossy().to_string();
         
         if entry.file_type().is_dir() {
-            folders.entry(rel_path_str).or_insert_with(Vec::new);
+            let folder_node = crate::types::FileTreeNode {
+                name: file_name.to_string(),
+                relative_path: rel_path_str.clone(),
+                node_type: "folder".to_string(),
+                children: Vec::new(),
+            };
+            folder_nodes.insert(rel_path_str.clone(), folder_node);
+            all_folder_paths.push(rel_path_str);
         } else if entry.file_type().is_file() && path.extension().and_then(|e| e.to_str()) == Some("md") {
             let parent_dir = if let Some(p) = relative_path.parent() {
                 p.to_string_lossy().to_string()
@@ -45,50 +53,41 @@ pub fn get_file_tree(root_dir: &Path) -> std::io::Result<Vec<crate::types::FileT
                 children: Vec::new(),
             };
             
-            folders.entry(parent_dir).or_insert_with(Vec::new).push(node);
+            files.entry(parent_dir).or_insert_with(Vec::new).push(node);
         }
     }
     
-    let mut folder_paths: Vec<String> = folders.keys().cloned().collect();
-    folder_paths.sort();
+    for (parent_path, file_list) in files {
+        if let Some(parent_node) = folder_nodes.get_mut(&parent_path) {
+            parent_node.children.extend(file_list);
+        }
+    }
     
-    for folder_path in folder_paths {
-        let folder_name = if folder_path.is_empty() {
-            "root".to_string()
+    all_folder_paths.sort_by(|a, b| b.len().cmp(&a.len()));
+    
+    for folder_path in all_folder_paths {
+        let parent_path = if let Some(p) = Path::new(&folder_path).parent() {
+            p.to_string_lossy().to_string()
         } else {
-            Path::new(&folder_path).file_name().and_then(|n| n.to_str()).unwrap_or(&folder_path).to_string()
+            String::new()
         };
         
-        let mut children = folders.get(&folder_path).unwrap_or(&Vec::new()).clone();
-        children.sort_by(|a, b| {
-            let type_order = |t: &str| if t == "folder" { 0 } else { 1 };
-            match (type_order(&a.node_type), type_order(&b.node_type)) {
-                (0, 1) => std::cmp::Ordering::Less,
-                (1, 0) => std::cmp::Ordering::Greater,
-                _ => a.name.cmp(&b.name),
-            }
-        });
-        
-        let node = crate::types::FileTreeNode {
-            name: folder_name,
-            relative_path: folder_path.clone(),
-            node_type: if folder_path.is_empty() { "root".to_string() } else { "folder".to_string() },
-            children,
-        };
-        
-        if folder_path.is_empty() {
-            tree = node.children;
-        } else {
-            if let Some(parent_path) = Path::new(&folder_path).parent() {
-                let parent_str = parent_path.to_string_lossy().to_string();
-                if let Some(parent_children) = folders.get_mut(&parent_str) {
-                    parent_children.push(node);
-                } else {
-                    tree.push(node);
+        if folder_nodes.contains_key(&parent_path) {
+            let child_folder = folder_nodes.remove(&folder_path);
+            if let Some(child) = child_folder {
+                if let Some(parent_node) = folder_nodes.get_mut(&parent_path) {
+                    parent_node.children.push(child);
                 }
-            } else {
-                tree.push(node);
             }
+        }
+    }
+    
+    let mut tree: Vec<crate::types::FileTreeNode> = folder_nodes.into_values().collect();
+    log::info!("[FILE_TREE] root nodes count: {}", tree.len());
+    for node in &tree {
+        log::info!("[FILE_TREE] root node: {} ({}) children: {}", node.name, node.relative_path, node.children.len());
+        for child in &node.children {
+            log::info!("[FILE_TREE]   child: {} ({}) type: {}", child.name, child.relative_path, child.node_type);
         }
     }
     

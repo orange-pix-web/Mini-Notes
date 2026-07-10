@@ -1,33 +1,23 @@
-import React, { useState } from 'react';
-import { FileTreeNode, Note } from '../types';
+import React from 'react';
+import { FileTreeNode } from '../types';
 
 interface FileTreeProps {
   tree: FileTreeNode[];
   activeFolder: string | null;
   onFolderClick: (folder: string) => void;
-  onNoteClick: (relativePath: string) => void;
-  selectedNote: Note | null;
+  onOpenFile: (relativePath: string) => void;
+  selectedRelativePath: string | null;
   depth?: number;
+  expandedFolders: Set<string>;
+  onToggleFolder: (relativePath: string) => void;
 }
 
-const FileTree: React.FC<FileTreeProps> = ({ tree, activeFolder, onFolderClick, onNoteClick, selectedNote, depth = 0 }) => {
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['Notes/Inbox']));
-
-  const toggleFolder = (relativePath: string) => {
-    setExpandedFolders(prev => {
-      const next = new Set(prev);
-      if (next.has(relativePath)) {
-        next.delete(relativePath);
-      } else {
-        next.add(relativePath);
-      }
-      return next;
-    });
-  };
+const FileTree: React.FC<FileTreeProps> = ({ tree, activeFolder, onFolderClick, onOpenFile, selectedRelativePath, depth = 0, expandedFolders, onToggleFolder }) => {
+  console.log('[FILETREE] rendering tree, depth:', depth, 'nodes:', tree.length);
 
   const isNoteSelected = (node: FileTreeNode) => {
-    if (node.node_type !== 'note' || !selectedNote) return false;
-    return selectedNote.relative_path === node.relative_path;
+    if (node.node_type !== 'note' || !selectedRelativePath) return false;
+    return selectedRelativePath === node.relative_path;
   };
 
   const renderNode = (node: FileTreeNode) => {
@@ -40,11 +30,13 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFolder, onFolderClick, 
       <div key={node.relative_path}>
         <div
           onClick={() => {
+            console.log('[FILETREE] onClick', node.relative_path, node.node_type);
             if (isFolder) {
-              toggleFolder(node.relative_path);
+              onToggleFolder(node.relative_path);
               onFolderClick(node.relative_path);
             } else {
-              onNoteClick(node.relative_path);
+              console.log('[FILETREE] calling onOpenFile', node.relative_path);
+              onOpenFile(node.relative_path);
             }
           }}
           className={`flex items-center gap-1 px-2 py-1.5 text-sm cursor-pointer transition-colors hover:bg-slate-100 ${
@@ -73,9 +65,11 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFolder, onFolderClick, 
             tree={node.children}
             activeFolder={activeFolder}
             onFolderClick={onFolderClick}
-            onNoteClick={onNoteClick}
-            selectedNote={selectedNote}
+            onOpenFile={onOpenFile}
+            selectedRelativePath={selectedRelativePath}
             depth={depth + 1}
+            expandedFolders={expandedFolders}
+            onToggleFolder={onToggleFolder}
           />
         )}
       </div>

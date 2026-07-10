@@ -12,12 +12,18 @@ interface SidebarProps {
   activeFolder: string | null;
   onNavChange: (nav: NavItem) => void;
   onNewNote?: () => void;
+  onNewFolder?: () => void;
   currentDir?: string;
   onDirChange?: () => void;
   createStatus?: {
     state: "idle" | "creating" | "success" | "failed";
     message: string;
   };
+  showNewFolderModal?: boolean;
+  newFolderName?: string;
+  onNewFolderNameChange?: (name: string) => void;
+  onNewFolderConfirm?: () => void;
+  onNewFolderCancel?: () => void;
 }
 
 function Sidebar({ 
@@ -25,9 +31,15 @@ function Sidebar({
   activeFolder,
   onNavChange, 
   onNewNote, 
+  onNewFolder,
   currentDir, 
   onDirChange, 
   createStatus,
+  showNewFolderModal,
+  newFolderName,
+  onNewFolderNameChange,
+  onNewFolderConfirm,
+  onNewFolderCancel,
 }: SidebarProps) {
   const [searchInput, setSearchInput] = useState("");
 
@@ -38,22 +50,29 @@ function Sidebar({
     }
   };
 
+  const handleNewFolderClick = () => {
+    console.log("[UI] new folder button clicked");
+    if (onNewFolder) {
+      onNewFolder();
+    }
+  };
+
   const isCreating = createStatus?.state === "creating";
   const isFailed = createStatus?.state === "failed";
   const isSuccess = createStatus?.state === "success";
 
   return (
-    <div className="w-64 bg-white border-r border-slate-200 flex flex-col">
+    <div className="w-[200px] bg-white border-r border-slate-200 flex flex-col">
       <div className="p-3 border-b border-slate-200">
         <h1 className="text-lg font-bold text-slate-800">Mini Notes</h1>
         <p className="text-xs text-slate-500 mt-0.5">个人工作笔记</p>
       </div>
 
-      <div className="p-2">
+      <div className="p-2 flex flex-col gap-2">
         <button
           onClick={handleNewNoteClick}
           disabled={!onNewNote || isCreating}
-          className={`w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+          className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
             isCreating
               ? "bg-blue-400 text-white cursor-wait"
               : "bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -61,6 +80,19 @@ function Sidebar({
         >
           <span>+</span>
           <span>{isCreating ? "创建中..." : "新建笔记"}</span>
+        </button>
+        
+        <button
+          onClick={handleNewFolderClick}
+          disabled={!onNewFolder || isCreating}
+          className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+            isCreating
+              ? "bg-green-400 text-white cursor-wait"
+              : "bg-green-500 text-white hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          }`}
+        >
+          <span>+</span>
+          <span>{isCreating ? "创建中..." : "新建文件夹"}</span>
         </button>
         
         <div className="mt-1 text-center text-xs">
@@ -115,6 +147,43 @@ function Sidebar({
           </button>
         </div>
       </div>
+
+      {showNewFolderModal && (
+        <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-4 w-[280px]">
+            <h3 className="text-sm font-medium text-slate-800 mb-3">新建文件夹</h3>
+            <input
+              type="text"
+              value={newFolderName}
+              onChange={(e) => onNewFolderNameChange?.(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent mb-3"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  onNewFolderConfirm?.();
+                } else if (e.key === "Escape") {
+                  onNewFolderCancel?.();
+                }
+              }}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={onNewFolderCancel}
+                className="flex-1 px-3 py-1.5 text-sm text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={onNewFolderConfirm}
+                disabled={!newFolderName || newFolderName.trim() === ""}
+                className="flex-1 px-3 py-1.5 text-sm text-white bg-green-500 rounded-lg hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                创建
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

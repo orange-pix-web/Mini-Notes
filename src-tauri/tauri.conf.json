@@ -14,7 +14,7 @@
   "app": {
     "security": {
       "capabilities": ["main"],
-      "csp": "default-src 'self'; script-src 'self'"
+      "csp": "default-src 'self' ipc: http://ipc.localhost; script-src 'self' ipc: http://ipc.localhost; connect-src 'self' ipc: http://ipc.localhost"
     },
     "windows": [
       {

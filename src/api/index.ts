@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Note, CreateNoteRequest, UpdateNoteRequest, SearchRequest, ApiResponse, FileTreeNode, RenameNoteRequest } from "@/types";
+import type { Note, CreateNoteRequest, CreateFolderRequest, UpdateNoteRequest, SearchRequest, ApiResponse, FileTreeNode, RenameNoteRequest, FileNotePayload } from "@/types";
 
 export async function initApp(): Promise<ApiResponse<{ data_dir: string; db_path: string }>> {
   return invoke("init_app");
@@ -14,6 +14,20 @@ export async function createNote(request?: CreateNoteRequest): Promise<ApiRespon
     return result;
   } catch (error) {
     console.error("[API] createNote invoke failed", error);
+    throw error;
+  }
+}
+
+export async function createFolder(request?: CreateFolderRequest): Promise<ApiResponse<string>> {
+  const name = request?.name || "";
+  const parentFolder = request?.parent_folder || "";
+  console.log("[API] createFolder invoke start", { name, parentFolder });
+  try {
+    const result = await invoke<ApiResponse<string>>("create_folder", { name, parentFolder });
+    console.log("[API] createFolder invoke success", result);
+    return result;
+  } catch (error) {
+    console.error("[API] createFolder invoke failed", error);
     throw error;
   }
 }
@@ -92,4 +106,52 @@ export async function setNotesRootDir(path: string): Promise<ApiResponse<{ data_
 
 export async function scanNotes(): Promise<ApiResponse<{ notes_root_dir: string }>> {
   return invoke("scan_notes");
+}
+
+export async function readFileNote(relativePath: string): Promise<ApiResponse<FileNotePayload>> {
+  console.log("[API] readFileNote", relativePath);
+  try {
+    const result = await invoke<ApiResponse<FileNotePayload>>("read_file_note", { relativePath });
+    console.log("[API] readFileNote result", result);
+    return result;
+  } catch (error) {
+    console.error("[API] readFileNote error", error);
+    throw error;
+  }
+}
+
+export async function writeFileNote(relativePath: string, content: string): Promise<ApiResponse<FileNotePayload>> {
+  console.log("[API] writeFileNote", relativePath);
+  try {
+    const result = await invoke<ApiResponse<FileNotePayload>>("write_file_note", { relativePath, content });
+    console.log("[API] writeFileNote result", result);
+    return result;
+  } catch (error) {
+    console.error("[API] writeFileNote error", error);
+    throw error;
+  }
+}
+
+export async function renameFileNote(relativePath: string, newTitle: string): Promise<ApiResponse<FileNotePayload>> {
+  console.log("[API] renameFileNote", relativePath, newTitle);
+  try {
+    const result = await invoke<ApiResponse<FileNotePayload>>("rename_file_note", { relativePath, newTitle });
+    console.log("[API] renameFileNote result", result);
+    return result;
+  } catch (error) {
+    console.error("[API] renameFileNote error", error);
+    throw error;
+  }
+}
+
+export async function deleteFileNote(relativePath: string): Promise<ApiResponse<void>> {
+  console.log("[API] deleteFileNote", relativePath);
+  try {
+    const result = await invoke<ApiResponse<void>>("delete_file_note", { relativePath });
+    console.log("[API] deleteFileNote result", result);
+    return result;
+  } catch (error) {
+    console.error("[API] deleteFileNote error", error);
+    throw error;
+  }
 }
