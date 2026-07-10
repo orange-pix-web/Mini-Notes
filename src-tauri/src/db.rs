@@ -472,6 +472,68 @@ pub fn delete_note(db_path: &Path, id: &str) -> SqlResult<()> {
     Ok(())
 }
 
+pub fn update_note_path(db_path: &Path, old_path: &str, new_path: &str) -> SqlResult<()> {
+    let conn = Connection::open(db_path)?;
+    
+    let new_folder = match new_path.rfind('/') {
+        Some(pos) => new_path[..pos].to_string(),
+        None => "".to_string(),
+    };
+    
+    conn.execute(
+        "UPDATE notes SET relative_path = ?, file_path = ?, folder = ?, updated_at = ? WHERE relative_path = ?",
+        params![new_path, new_path, new_folder, now_str(), old_path],
+    )?;
+    
+    Ok(())
+}
+
+pub fn update_folder_path(db_path: &Path, old_path: &str, new_path: &str) -> SqlResult<()> {
+    let conn = Connection::open(db_path)?;
+    
+    let mut stmt = conn.prepare("SELECT relative_path FROM notes WHERE relative_path LIKE ?")?;
+    let pattern = format!("{}%", old_path);
+    let mut rows = stmt.query(params![pattern])?;
+    
+    let mut paths_to_update = Vec::new();
+    while let Some(row) = rows.next()? {
+        let path: String = row.get(0)?;
+        paths_to_update.push(path);
+    }
+    
+    for old_note_path in paths_to_update {
+        let new_note_path = if old_note_path == old_path {
+            new_path.to_string()
+        } else {
+            old_note_path.replacen(old_path, new_path, 1)
+        };
+        
+        let new_folder = match new_note_path.rfind('/') {
+            Some(pos) => new_note_path[..pos].to_string(),
+            None => "".to_string(),
+        };
+        
+        conn.execute(
+            "UPDATE notes SET relative_path = ?, file_path = ?, folder = ?, updated_at = ? WHERE relative_path = ?",
+            params![new_note_path, new_note_path, new_folder, now_str(), old_note_path],
+        )?;
+    }
+    
+    Ok(())
+}
+
+pub fn delete_folder_notes(db_path: &Path, folder_path: &str) -> SqlResult<()> {
+    let conn = Connection::open(db_path)?;
+    
+    let pattern = format!("{}%", folder_path);
+    conn.execute(
+        "UPDATE notes SET deleted_at = ?, status = 'deleted' WHERE relative_path LIKE ?",
+        params![now_str(), pattern],
+    )?;
+    
+    Ok(())
+}
+
 pub fn delete_note_by_path(db_path: &Path, relative_path: &str) -> SqlResult<()> {
     let conn = Connection::open(db_path)?;
     

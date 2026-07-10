@@ -25,9 +25,11 @@ interface NoteListProps {
   onOpenFile: (relativePath: string) => void;
   expandedFolders: Set<string>;
   onToggleFolder: (relativePath: string) => void;
+  onMoveFile: (sourcePath: string, targetFolder: string) => void;
+  onDeleteFolder: (folderPath: string) => void;
 }
 
-function NoteList({ notes, selectedRelativePath, isLoading, activeNav, folderName, fileTree, activeFolder, onFolderChange, onOpenFile, expandedFolders, onToggleFolder }: NoteListProps) {
+function NoteList({ notes, selectedRelativePath, isLoading, activeNav, folderName, fileTree, activeFolder, onFolderChange, onOpenFile, expandedFolders, onToggleFolder, onMoveFile, onDeleteFolder }: NoteListProps) {
   console.log('[NOTELIST] fileTree length:', fileTree.length);
   const currentNav = navOptions.find((n) => n.id === activeNav);
   const navTitle = activeNav === "folder" ? folderName || "文件夹" : currentNav?.label || "笔记";
@@ -61,6 +63,8 @@ function NoteList({ notes, selectedRelativePath, isLoading, activeNav, folderNam
                   selectedRelativePath={selectedRelativePath}
                   expandedFolders={expandedFolders}
                   onToggleFolder={onToggleFolder}
+                  onMoveFile={onMoveFile}
+                  onDeleteFolder={onDeleteFolder}
                 />
               )}
             </div>

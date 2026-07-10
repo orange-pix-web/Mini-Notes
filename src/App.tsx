@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import Sidebar from "@/components/Sidebar";
 import NoteList from "@/components/NoteList";
 import Editor from "@/components/Editor";
-import { initApp, listNotes, createNote, createFolder, getWorkspaceInfo, setNotesRootDir, getFileTree, readFileNote, writeFileNote, renameFileNote, deleteFileNote } from "@/api";
+import { initApp, listNotes, createNote, createFolder, getWorkspaceInfo, setNotesRootDir, getFileTree, readFileNote, writeFileNote, renameFileNote, deleteFileNote, moveFile, deleteFolder } from "@/api";
 import type { Note, NavItem, FileTreeNode, FileNotePayload } from "@/types";
 import { open } from "@tauri-apps/plugin-dialog";
 
@@ -293,6 +293,45 @@ function App() {
     }
   }, [newFolderName, loadFileTree, activeFolder, handleFolderChange]);
 
+  const handleMoveFile = useCallback(async (sourcePath: string, targetFolder: string) => {
+    console.log("[APP] handleMoveFile", sourcePath, targetFolder);
+    
+    try {
+      const response = await moveFile({ source_path: sourcePath, target_folder: targetFolder });
+      console.log("[APP] moveFile response", response);
+      
+      if (response.success) {
+        await loadFileTree();
+        console.log("[APP] moveFile success, file tree reloaded");
+      } else {
+        console.error("[APP] moveFile failed", response.message || "Unknown error");
+      }
+    } catch (error) {
+      console.error("[APP] moveFile failed with exception", error);
+    }
+  }, [loadFileTree]);
+
+  const handleDeleteFolder = useCallback(async (folderPath: string) => {
+    console.log("[APP] handleDeleteFolder", folderPath);
+    
+    try {
+      const response = await deleteFolder(folderPath);
+      console.log("[APP] deleteFolder response", response);
+      
+      if (response.success) {
+        await loadFileTree();
+        if (activeFolder === folderPath) {
+          setActiveFolder(null);
+        }
+        console.log("[APP] deleteFolder success, file tree reloaded");
+      } else {
+        console.error("[APP] deleteFolder failed", response.message || "Unknown error");
+      }
+    } catch (error) {
+      console.error("[APP] deleteFolder failed with exception", error);
+    }
+  }, [loadFileTree, activeFolder]);
+
   const handleDirChange = useCallback(async () => {
     try {
       const selected = await open({
@@ -423,6 +462,8 @@ function App() {
         onOpenFile={handleOpenFile}
         expandedFolders={expandedFolders}
         onToggleFolder={handleToggleFolder}
+        onMoveFile={handleMoveFile}
+        onDeleteFolder={handleDeleteFolder}
       />
       <Editor 
         file={selectedFile}

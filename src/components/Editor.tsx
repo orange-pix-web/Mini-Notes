@@ -190,7 +190,7 @@ function Editor({ file, onSaveFile, onDeleteFile, onRenameFile }: EditorProps) {
   }
 
   return (
-    <div className="w-[400px] flex flex-col bg-white">
+    <div className="flex-1 min-w-[500px] flex flex-col bg-white">
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-white">
         <div className="flex items-center gap-3">
           {isEditingTitle ? (

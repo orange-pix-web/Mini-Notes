@@ -224,6 +224,201 @@ fn create_folder(name: String, parent_folder: String) -> ApiResponse<String> {
 }
 
 #[command]
+fn move_file(source_path: String, target_folder: String) -> ApiResponse<String> {
+    info!("[FILE] move_file command called: source_path={}, target_folder={}", source_path, target_folder);
+    
+    if source_path.starts_with('/') || source_path.starts_with('\\') {
+        error!("[FILE] move_file 拒绝绝对路径");
+        return ApiResponse {
+            success: false,
+            message: "拒绝绝对路径".to_string(),
+            data: None,
+        };
+    }
+    
+    if source_path.contains("..") || target_folder.contains("..") {
+        error!("[FILE] move_file 路径包含非法字符");
+        return ApiResponse {
+            success: false,
+            message: "路径包含非法字符".to_string(),
+            data: None,
+        };
+    }
+    
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    
+    let notes_root_dir = match get_notes_root_dir(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            error!("[FILE] move_file 获取笔记根目录失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: "获取笔记根目录失败".to_string(),
+                data: None,
+            };
+        }
+    };
+    
+    let source_full_path = notes_root_dir.join(&source_path);
+    
+    if !source_full_path.exists() {
+        error!("[FILE] move_file 源文件不存在: {}", source_full_path.display());
+        return ApiResponse {
+            success: false,
+            message: "源文件不存在".to_string(),
+            data: None,
+        };
+    }
+    
+    let target_full_path = if target_folder.is_empty() {
+        notes_root_dir.join(source_full_path.file_name().unwrap())
+    } else {
+        notes_root_dir.join(&target_folder).join(source_full_path.file_name().unwrap())
+    };
+    
+    if target_full_path.exists() {
+        error!("[FILE] move_file 目标文件已存在: {}", target_full_path.display());
+        return ApiResponse {
+            success: false,
+            message: "目标文件已存在".to_string(),
+            data: None,
+        };
+    }
+    
+    let is_dir = source_full_path.is_dir();
+    info!("[FILE] move_file is_dir: {}", is_dir);
+    
+    match std::fs::rename(&source_full_path, &target_full_path) {
+        Ok(_) => {
+            let new_relative_path = target_full_path.strip_prefix(&notes_root_dir).unwrap_or(&target_full_path).to_string_lossy().to_string();
+            info!("[FILE] move_file 成功: {} -> {}", source_path, new_relative_path);
+            
+            if is_dir {
+                match db::update_folder_path(&db_path, &source_path, &new_relative_path) {
+                    Ok(_) => {
+                        info!("[FILE] move_file 文件夹数据库更新成功");
+                    }
+                    Err(e) => {
+                        error!("[FILE] move_file 文件夹数据库更新失败: {}", e);
+                    }
+                }
+            } else {
+                match db::update_note_path(&db_path, &source_path, &new_relative_path) {
+                    Ok(_) => {
+                        info!("[FILE] move_file 数据库更新成功");
+                    }
+                    Err(e) => {
+                        error!("[FILE] move_file 数据库更新失败: {}", e);
+                    }
+                }
+            }
+            
+            ApiResponse {
+                success: true,
+                message: if is_dir { "文件夹移动成功".to_string() } else { "文件移动成功".to_string() },
+                data: Some(new_relative_path),
+            }
+        }
+        Err(e) => {
+            error!("[FILE] move_file 失败: {}", e);
+            ApiResponse {
+                success: false,
+                message: format!("移动失败: {}", e),
+                data: None,
+            }
+        }
+    }
+}
+
+#[command]
+fn delete_folder(folder_path: String) -> ApiResponse<()> {
+    info!("[FILE] delete_folder command called: folder_path={}", folder_path);
+    
+    if folder_path.starts_with('/') || folder_path.starts_with('\\') {
+        error!("[FILE] delete_folder 拒绝绝对路径");
+        return ApiResponse {
+            success: false,
+            message: "拒绝绝对路径".to_string(),
+            data: None,
+        };
+    }
+    
+    if folder_path.contains("..") {
+        error!("[FILE] delete_folder 路径包含非法字符");
+        return ApiResponse {
+            success: false,
+            message: "路径包含非法字符".to_string(),
+            data: None,
+        };
+    }
+    
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    
+    let notes_root_dir = match get_notes_root_dir(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            error!("[FILE] delete_folder 获取笔记根目录失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: "获取笔记根目录失败".to_string(),
+                data: None,
+            };
+        }
+    };
+    
+    let folder_full_path = notes_root_dir.join(&folder_path);
+    
+    if !folder_full_path.exists() {
+        error!("[FILE] delete_folder 文件夹不存在: {}", folder_full_path.display());
+        return ApiResponse {
+            success: false,
+            message: "文件夹不存在".to_string(),
+            data: None,
+        };
+    }
+    
+    if !folder_full_path.is_dir() {
+        error!("[FILE] delete_folder 不是文件夹: {}", folder_full_path.display());
+        return ApiResponse {
+            success: false,
+            message: "不是文件夹".to_string(),
+            data: None,
+        };
+    }
+    
+    match std::fs::remove_dir_all(&folder_full_path) {
+        Ok(_) => {
+            info!("[FILE] delete_folder 成功删除文件夹: {}", folder_full_path.display());
+            
+            match db::delete_folder_notes(&db_path, &folder_path) {
+                Ok(_) => {
+                    info!("[FILE] delete_folder 数据库更新成功");
+                }
+                Err(e) => {
+                    error!("[FILE] delete_folder 数据库更新失败: {}", e);
+                }
+            }
+            
+            ApiResponse {
+                success: true,
+                message: "文件夹删除成功".to_string(),
+                data: None,
+            }
+        }
+        Err(e) => {
+            error!("[FILE] delete_folder 失败: {}", e);
+            ApiResponse {
+                success: false,
+                message: format!("文件夹删除失败: {}", e),
+                data: None,
+            }
+        }
+    }
+}
+
+#[command]
 fn get_note(id: String) -> ApiResponse<Note> {
     let data_dir = get_data_dir();
     let db_path = data_dir.join("database").join("index.db");
@@ -1098,6 +1293,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             init_app,
             create_note,
             create_folder,
+            move_file,
+            delete_folder,
             get_note,
             update_note,
             list_notes,

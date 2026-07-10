@@ -120,6 +120,11 @@ export interface RenameNoteRequest {
   new_title: string;
 }
 
+export interface MoveFileRequest {
+  source_path: string;
+  target_folder: string;
+}
+
 export interface FileNotePayload {
   title: string;
   relative_path: string;

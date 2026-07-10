@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Note, CreateNoteRequest, CreateFolderRequest, UpdateNoteRequest, SearchRequest, ApiResponse, FileTreeNode, RenameNoteRequest, FileNotePayload } from "@/types";
+import type { Note, CreateNoteRequest, CreateFolderRequest, UpdateNoteRequest, SearchRequest, ApiResponse, FileTreeNode, RenameNoteRequest, FileNotePayload, MoveFileRequest } from "@/types";
 
 export async function initApp(): Promise<ApiResponse<{ data_dir: string; db_path: string }>> {
   return invoke("init_app");
@@ -144,6 +144,20 @@ export async function renameFileNote(relativePath: string, newTitle: string): Pr
   }
 }
 
+export async function moveFile(request?: MoveFileRequest): Promise<ApiResponse<string>> {
+  const sourcePath = request?.source_path || "";
+  const targetFolder = request?.target_folder || "";
+  console.log("[API] moveFile", sourcePath, targetFolder);
+  try {
+    const result = await invoke<ApiResponse<string>>("move_file", { sourcePath, targetFolder });
+    console.log("[API] moveFile result", result);
+    return result;
+  } catch (error) {
+    console.error("[API] moveFile error", error);
+    throw error;
+  }
+}
+
 export async function deleteFileNote(relativePath: string): Promise<ApiResponse<void>> {
   console.log("[API] deleteFileNote", relativePath);
   try {
@@ -152,6 +166,18 @@ export async function deleteFileNote(relativePath: string): Promise<ApiResponse<
     return result;
   } catch (error) {
     console.error("[API] deleteFileNote error", error);
+    throw error;
+  }
+}
+
+export async function deleteFolder(folderPath: string): Promise<ApiResponse<void>> {
+  console.log("[API] deleteFolder", folderPath);
+  try {
+    const result = await invoke<ApiResponse<void>>("delete_folder", { folderPath });
+    console.log("[API] deleteFolder result", result);
+    return result;
+  } catch (error) {
+    console.error("[API] deleteFolder error", error);
     throw error;
   }
 }

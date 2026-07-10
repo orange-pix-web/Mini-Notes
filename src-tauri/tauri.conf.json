@@ -1,6 +1,6 @@
 {
   "productName": "Mini Notes",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "com.mininotes.app",
   "build": {
     "beforeBuildCommand": "npm run build",
@@ -19,10 +19,11 @@
     "windows": [
       {
         "title": "Mini Notes",
-        "width": 1200,
+        "width": 900,
         "height": 800,
         "center": true,
-        "resizable": true
+        "resizable": true,
+        "dragDropEnabled": false
       }
     ]
   }
