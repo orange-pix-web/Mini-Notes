@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import Sidebar from "@/components/Sidebar";
 import NoteList from "@/components/NoteList";
 import Editor from "@/components/Editor";
-import { initApp, listNotes, createNote, createFolder, getWorkspaceInfo, setNotesRootDir, getFileTree, readFileNote, writeFileNote, renameFileNote, deleteFileNote, moveFile, deleteFolder } from "@/api";
+import { initApp, listNotes, createNote, createFolder, getWorkspaceInfo, setNotesRootDir, getFileTree, readFileNote, writeFileNote, renameFileNote, deleteFileNote, moveFile, deleteFolder, renameFolder } from "@/api";
 import type { Note, NavItem, FileTreeNode, FileNotePayload } from "@/types";
 import { open } from "@tauri-apps/plugin-dialog";
 
@@ -36,16 +36,15 @@ function App() {
 
   const getDbFolderName = (fileTreePath: string): string => {
     if (fileTreePath.startsWith("Notes/")) {
-      const afterNotes = fileTreePath.slice(6);
-      return afterNotes || "Inbox";
+      return fileTreePath.slice(6);
     }
-    return fileTreePath || "Inbox";
+    return fileTreePath;
   };
 
   const loadNotes = useCallback(async (filter?: string, folder?: string) => {
     const currentFilter = filter || activeNav;
-    let currentFolder = folder || activeFolder || undefined;
-    if (currentFolder) {
+    let currentFolder = folder ?? activeFolder ?? undefined;
+    if (currentFolder !== undefined) {
       currentFolder = getDbFolderName(currentFolder);
     }
     setIsLoading(true);
@@ -163,8 +162,10 @@ function App() {
     try {
       console.log("[APP] invoking createNote");
       
-      let targetFolder = "Inbox";
-      if (activeNav === "folder" && activeFolder) {
+      const isRootFolderSelected = activeNav === "folder" && activeFolder === "";
+
+      let targetFolder = "";
+      if (activeNav === "folder" && activeFolder !== null) {
         targetFolder = activeFolder;
       } else if (activeNav === "inbox") {
         targetFolder = "Inbox";
@@ -176,12 +177,16 @@ function App() {
         console.log("[APP] createNote success", response.data);
         const createdNote = response.data;
         
-        if (activeNav !== "folder" || !activeFolder) {
+        if (isRootFolderSelected) {
+          await loadNotes("folder", "");
+        } else if (activeNav !== "folder" || !activeFolder) {
           setActiveNav("folder");
           setActiveFolder("Inbox");
+          await loadNotes("folder", "Inbox");
+        } else {
+          await loadNotes("folder", activeFolder);
         }
-        
-        await loadNotes("folder", activeNav === "folder" && activeFolder ? activeFolder : "Inbox");
+
         await loadFileTree();
         if (createdNote.relative_path) {
           await handleOpenFile(createdNote.relative_path);
@@ -332,6 +337,27 @@ function App() {
     }
   }, [loadFileTree, activeFolder]);
 
+  const handleRenameFolder = useCallback(async (oldPath: string, newName: string) => {
+    console.log("[APP] handleRenameFolder", oldPath, newName);
+    
+    try {
+      const response = await renameFolder({ old_path: oldPath, new_name: newName });
+      console.log("[APP] renameFolder response", response);
+      
+      if (response.success) {
+        await loadFileTree();
+        if (activeFolder === oldPath) {
+          setActiveFolder(response.data || null);
+        }
+        console.log("[APP] renameFolder success, file tree reloaded");
+      } else {
+        console.error("[APP] renameFolder failed", response.message || "Unknown error");
+      }
+    } catch (error) {
+      console.error("[APP] renameFolder failed with exception", error);
+    }
+  }, [loadFileTree, activeFolder]);
+
   const handleDirChange = useCallback(async () => {
     try {
       const selected = await open({
@@ -415,6 +441,9 @@ function App() {
   }, [loadFileTree]);
 
   const getCurrentFolderName = useCallback(() => {
+    if (activeNav === "folder" && activeFolder === "") {
+      return "根目录";
+    }
     if (activeNav === "folder" && activeFolder) {
       return activeFolder.split("/").pop() || activeFolder;
     }
@@ -449,6 +478,7 @@ function App() {
         onNewFolderNameChange={setNewFolderName}
         onNewFolderConfirm={handleFolderCreated}
         onNewFolderCancel={() => setShowNewFolderModal(false)}
+        currentFolderPath={activeFolder || '根目录'}
       />
       <NoteList 
         notes={notes}
@@ -464,6 +494,7 @@ function App() {
         onToggleFolder={handleToggleFolder}
         onMoveFile={handleMoveFile}
         onDeleteFolder={handleDeleteFolder}
+        onRenameFolder={handleRenameFolder}
       />
       <Editor 
         file={selectedFile}

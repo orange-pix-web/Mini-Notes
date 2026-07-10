@@ -24,6 +24,7 @@ interface SidebarProps {
   onNewFolderNameChange?: (name: string) => void;
   onNewFolderConfirm?: () => void;
   onNewFolderCancel?: () => void;
+  currentFolderPath?: string;
 }
 
 function Sidebar({ 
@@ -40,6 +41,7 @@ function Sidebar({
   onNewFolderNameChange,
   onNewFolderConfirm,
   onNewFolderCancel,
+  currentFolderPath,
 }: SidebarProps) {
   const [searchInput, setSearchInput] = useState("");
 
@@ -150,8 +152,14 @@ function Sidebar({
 
       {showNewFolderModal && (
         <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-4 w-[280px]">
-            <h3 className="text-sm font-medium text-slate-800 mb-3">新建文件夹</h3>
+          <div className="bg-white rounded-lg shadow-xl p-4 w-[320px]">
+            <h3 className="text-sm font-medium text-slate-800 mb-2">新建文件夹</h3>
+            <div className="text-xs text-slate-500 mb-3 bg-slate-50 px-2 py-1.5 rounded">
+              <span className="text-slate-400">创建路径：</span>
+              <span className="text-blue-500 truncate ml-1">
+                {currentFolderPath || '根目录'}
+              </span>
+            </div>
             <input
               type="text"
               value={newFolderName}

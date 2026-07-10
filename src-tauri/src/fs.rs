@@ -57,8 +57,11 @@ pub fn get_file_tree(root_dir: &Path) -> std::io::Result<Vec<crate::types::FileT
         }
     }
     
+    let mut root_files: Vec<crate::types::FileTreeNode> = Vec::new();
     for (parent_path, file_list) in files {
-        if let Some(parent_node) = folder_nodes.get_mut(&parent_path) {
+        if parent_path.is_empty() {
+            root_files.extend(file_list);
+        } else if let Some(parent_node) = folder_nodes.get_mut(&parent_path) {
             parent_node.children.extend(file_list);
         }
     }
@@ -83,6 +86,7 @@ pub fn get_file_tree(root_dir: &Path) -> std::io::Result<Vec<crate::types::FileT
     }
     
     let mut tree: Vec<crate::types::FileTreeNode> = folder_nodes.into_values().collect();
+    tree.extend(root_files);
     log::info!("[FILE_TREE] root nodes count: {}", tree.len());
     for node in &tree {
         log::info!("[FILE_TREE] root node: {} ({}) children: {}", node.name, node.relative_path, node.children.len());

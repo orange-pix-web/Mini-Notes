@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Note, NavItem, NavOption, FileTreeNode } from "@/types";
 import FileTree from "./FileTree";
 
@@ -27,12 +28,25 @@ interface NoteListProps {
   onToggleFolder: (relativePath: string) => void;
   onMoveFile: (sourcePath: string, targetFolder: string) => void;
   onDeleteFolder: (folderPath: string) => void;
+  onRenameFolder: (oldPath: string, newName: string) => void;
 }
 
-function NoteList({ notes, selectedRelativePath, isLoading, activeNav, folderName, fileTree, activeFolder, onFolderChange, onOpenFile, expandedFolders, onToggleFolder, onMoveFile, onDeleteFolder }: NoteListProps) {
+function NoteList({ notes, selectedRelativePath, isLoading, activeNav, folderName, fileTree, activeFolder, onFolderChange, onOpenFile, expandedFolders, onToggleFolder, onMoveFile, onDeleteFolder, onRenameFolder }: NoteListProps) {
+  const [draggedPath, setDraggedPath] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+
   console.log('[NOTELIST] fileTree length:', fileTree.length);
   const currentNav = navOptions.find((n) => n.id === activeNav);
   const navTitle = activeNav === "folder" ? folderName || "文件夹" : currentNav?.label || "笔记";
+
+  const getTargetDisplayName = () => {
+    if (dropTarget === '') {
+      return '根目录';
+    } else if (dropTarget) {
+      return dropTarget;
+    }
+    return '';
+  };
 
   return (
     <div className="w-[200px] bg-white border-r border-slate-200 flex flex-col">
@@ -65,12 +79,26 @@ function NoteList({ notes, selectedRelativePath, isLoading, activeNav, folderNam
                   onToggleFolder={onToggleFolder}
                   onMoveFile={onMoveFile}
                   onDeleteFolder={onDeleteFolder}
+                  onRenameFolder={onRenameFolder}
+                  draggedPath={draggedPath}
+                  setDraggedPath={setDraggedPath}
+                  dropTarget={dropTarget}
+                  setDropTarget={setDropTarget}
                 />
               )}
             </div>
           </div>
         )}
       </div>
+
+      {draggedPath && (
+        <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-slate-800 text-white px-4 py-2 rounded-lg shadow-lg text-sm z-50">
+          <span className="text-slate-300">移动到：</span>
+          <span className="text-blue-300 font-medium ml-1">
+            {getTargetDisplayName() || '选择目标位置'}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

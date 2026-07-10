@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { FileTreeNode } from '../types';
 
 interface FileTreeProps {
@@ -12,18 +12,36 @@ interface FileTreeProps {
   onToggleFolder: (relativePath: string) => void;
   onMoveFile: (sourcePath: string, targetFolder: string) => void;
   onDeleteFolder: (folderPath: string) => void;
+  onRenameFolder: (oldPath: string, newName: string) => void;
+  draggedPath: string | null;
+  setDraggedPath: (path: string | null) => void;
+  dropTarget: string | null;
+  setDropTarget: (path: string | null) => void;
 }
 
-const FileTree: React.FC<FileTreeProps> = ({ tree, activeFolder, onFolderClick, onOpenFile, selectedRelativePath, depth = 0, expandedFolders, onToggleFolder, onMoveFile, onDeleteFolder }) => {
-  const [draggedPath, setDraggedPath] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<string | null>(null);
+const FileTree: React.FC<FileTreeProps> = ({ 
+  tree, 
+  activeFolder, 
+  onFolderClick, 
+  onOpenFile, 
+  selectedRelativePath, 
+  depth = 0, 
+  expandedFolders, 
+  onToggleFolder, 
+  onMoveFile, 
+  onDeleteFolder,
+  onRenameFolder,
+  draggedPath,
+  setDraggedPath,
+  dropTarget,
+  setDropTarget,
+}) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [folderToDelete, setFolderToDelete] = useState<{ path: string; name: string } | null>(null);
+  const [renamingPath, setRenamingPath] = useState<string | null>(null);
+  const [renamingName, setRenamingName] = useState("");
   const dragCounterRef = useRef(0);
-
-  useEffect(() => {
-    console.log('[FILETREE] mounted, tree length:', tree.length);
-  }, []);
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
   const isNoteSelected = (node: FileTreeNode) => {
     if (node.node_type !== 'note' || !selectedRelativePath) return false;
@@ -90,6 +108,45 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFolder, onFolderClick, 
     dragCounterRef.current = 0;
   };
 
+  const handleRootDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    console.log('[DRAG] handleRootDrop');
+    const sourcePath = e.dataTransfer.getData('text/plain');
+    console.log('[DRAG] handleRootDrop sourcePath:', sourcePath);
+    
+    if (sourcePath) {
+      console.log('[DRAG] calling onMoveFile to root:', sourcePath, '->', '(root)');
+      onMoveFile(sourcePath, '');
+    }
+    setDraggedPath(null);
+    setDropTarget(null);
+    dragCounterRef.current = 0;
+  };
+
+  const handleDoubleClick = (node: FileTreeNode) => {
+    if (node.node_type === 'folder') {
+      setRenamingPath(node.relative_path);
+      setRenamingName(node.name);
+    }
+  };
+
+  const handleRenameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setRenamingName(e.target.value);
+  };
+
+  const handleRenameConfirm = () => {
+    if (renamingPath && renamingName.trim()) {
+      onRenameFolder(renamingPath, renamingName.trim());
+    }
+    setRenamingPath(null);
+    setRenamingName("");
+  };
+
+  const handleRenameCancel = () => {
+    setRenamingPath(null);
+    setRenamingName("");
+  };
+
   const renderNode = (node: FileTreeNode) => {
     const isFolder = node.node_type === 'folder';
     const isExpanded = expandedFolders.has(node.relative_path);
@@ -97,18 +154,20 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFolder, onFolderClick, 
     const isSelected = isNoteSelected(node);
     const isDragging = draggedPath === node.relative_path;
     const isDropTargetNode = dropTarget === node.relative_path;
+    const isRenaming = renamingPath === node.relative_path;
 
     return (
       <div key={node.relative_path}>
         <div
           onClick={() => {
-            if (isFolder) {
+            if (isFolder && !isRenaming) {
               onToggleFolder(node.relative_path);
               onFolderClick(node.relative_path);
-            } else {
+            } else if (!isRenaming) {
               onOpenFile(node.relative_path);
             }
           }}
+          onDoubleClick={() => handleDoubleClick(node)}
           draggable={true}
           onDragStart={(e) => handleDragStart(e, node.relative_path, node.node_type)}
           onDragOver={(e) => handleDragOver(e, node.relative_path, isFolder)}
@@ -116,7 +175,7 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFolder, onFolderClick, 
           onDragLeave={(e) => handleDragLeave(e, node.relative_path, isFolder)}
           onDrop={(e) => handleDrop(e, node.relative_path, isFolder)}
           onDragEnd={handleDragEnd}
-          className={`flex items-center gap-1 px-2 py-1.5 text-sm cursor-pointer transition-colors hover:bg-slate-100 ${
+          className={`relative flex items-center gap-1 px-2 py-1.5 text-sm cursor-pointer transition-colors hover:bg-slate-100 ${
             isDragging ? 'opacity-50' :
             isDropTargetNode ? 'bg-blue-100 border-l-2 border-blue-500' :
             isSelected ? 'bg-blue-50 text-blue-600 font-medium' :
@@ -137,8 +196,27 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFolder, onFolderClick, 
               <span className="text-lg">📄</span>
             </>
           )}
-          <span className="truncate flex-1">{node.name}</span>
-          {isFolder && (
+          {isRenaming ? (
+            <input
+              ref={renameInputRef}
+              type="text"
+              value={renamingName}
+              onChange={handleRenameChange}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleRenameConfirm();
+                } else if (e.key === 'Escape') {
+                  handleRenameCancel();
+                }
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="absolute left-10 right-0 px-1 py-0.5 text-sm border border-blue-400 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 z-10"
+              autoFocus
+            />
+          ) : (
+            <span className="truncate flex-1">{node.name}</span>
+          )}
+          {isFolder && !isRenaming && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -164,6 +242,11 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFolder, onFolderClick, 
             onToggleFolder={onToggleFolder}
             onMoveFile={onMoveFile}
             onDeleteFolder={onDeleteFolder}
+            onRenameFolder={onRenameFolder}
+            draggedPath={draggedPath}
+            setDraggedPath={setDraggedPath}
+            dropTarget={dropTarget}
+            setDropTarget={setDropTarget}
           />
         )}
       </div>
@@ -183,8 +266,47 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFolder, onFolderClick, 
     setFolderToDelete(null);
   };
 
+  if (depth > 0) {
+    return (
+      <div>
+        {tree.map(renderNode)}
+      </div>
+    );
+  }
+
   return (
-    <div className="overflow-y-auto">
+    <div 
+      className="overflow-y-auto"
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        setDropTarget('');
+      }}
+      onDrop={handleRootDrop}
+    >
+      <div
+        onClick={() => onFolderClick('')}
+        className={`flex items-center gap-2 px-2 py-2 text-sm cursor-pointer transition-colors min-h-[40px] ${
+          dropTarget === '' ? 'bg-blue-50 border border-blue-300 rounded-lg' :
+          activeFolder === '' ? 'bg-blue-50 text-blue-600' :
+          'hover:bg-slate-50'
+        }`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          setDropTarget('');
+        }}
+        onDrop={handleRootDrop}
+      >
+        <span className="text-lg">📂</span>
+        <span className={activeFolder === '' ? 'text-blue-600 font-medium' : 'text-slate-600'}>根目录</span>
+        {draggedPath && dropTarget === '' && (
+          <span className="text-xs text-blue-500 ml-auto">↓ 放置到这里</span>
+        )}
+      </div>
+
+      <div className="border-t border-slate-100 my-1"></div>
+
       {tree.map(renderNode)}
       
       {showDeleteConfirm && folderToDelete && (

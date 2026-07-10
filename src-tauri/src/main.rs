@@ -13,7 +13,7 @@ mod fs;
 mod logger;
 mod types;
 
-use types::{ApiResponse, AppState, CreateFolderRequest, CreateNoteRequest, FileNotePayload, RenameNoteRequest, SearchRequest, UpdateNoteRequest};
+use types::{ApiResponse, AppState, CreateNoteRequest, FileNotePayload, RenameFolderRequest, RenameNoteRequest, SearchRequest, UpdateNoteRequest};
 use db::Note;
 
 fn get_data_dir() -> PathBuf {
@@ -37,7 +37,7 @@ fn init_data_directory(data_dir: &Path) -> SqlResult<()> {
     for dir in dirs.iter() {
         let full_path = data_dir.join(dir);
         if !full_path.exists() {
-            std::fs::create_dir_all(&full_path).map_err(|e| {
+            std::fs::create_dir_all(&full_path).map_err(|_e| {
                 rusqlite::Error::QueryReturnedNoRows
             })?;
             info!("[DIR] 创建目录: {}", full_path.display());
@@ -1286,6 +1286,85 @@ fn rename_note(request: RenameNoteRequest) -> ApiResponse<Note> {
     }
 }
 
+#[command]
+fn rename_folder(request: RenameFolderRequest) -> ApiResponse<String> {
+    info!("[RENAME] rename_folder command called: old_path={}, new_name={}", request.old_path, request.new_name);
+    
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    
+    let notes_root_dir = match get_notes_root_dir(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            error!("[RENAME] 获取笔记根目录失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: "获取笔记根目录失败".to_string(),
+                data: None,
+            };
+        }
+    };
+    
+    let old_full_path = notes_root_dir.join(&request.old_path);
+    if !old_full_path.exists() {
+        error!("[RENAME] rename_folder 源文件夹不存在: {}", old_full_path.display());
+        return ApiResponse {
+            success: false,
+            message: "源文件夹不存在".to_string(),
+            data: None,
+        };
+    }
+    
+    let parent_path = if let Some(p) = old_full_path.parent() {
+        p.to_path_buf()
+    } else {
+        notes_root_dir.clone()
+    };
+    
+    let new_full_path = parent_path.join(&request.new_name);
+    if new_full_path.exists() {
+        error!("[RENAME] rename_folder 目标文件夹已存在: {}", new_full_path.display());
+        return ApiResponse {
+            success: false,
+            message: "目标文件夹已存在".to_string(),
+            data: None,
+        };
+    }
+    
+    let new_relative_path = new_full_path.strip_prefix(&notes_root_dir).unwrap_or(&new_full_path).to_string_lossy().to_string();
+    
+    match std::fs::rename(&old_full_path, &new_full_path) {
+        Ok(_) => {
+            match db::update_folder_path(&db_path, &request.old_path, &new_relative_path) {
+                Ok(_) => {
+                    info!("[RENAME] rename_folder 成功: {} -> {}", request.old_path, new_relative_path);
+                    ApiResponse {
+                        success: true,
+                        message: "文件夹重命名成功".to_string(),
+                        data: Some(new_relative_path),
+                    }
+                }
+                Err(e) => {
+                    error!("[RENAME] rename_folder 数据库更新失败: {}", e);
+                    ApiResponse {
+                        success: false,
+                        message: format!("文件夹重命名成功但数据库更新失败: {}", e),
+                        data: None,
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            error!("[RENAME] rename_folder 文件系统操作失败: {}", e);
+            ApiResponse {
+                success: false,
+                message: format!("文件夹重命名失败: {}", e),
+                data: None,
+            }
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -1316,6 +1395,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             scan_notes,
             get_file_tree,
             rename_note,
+            rename_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

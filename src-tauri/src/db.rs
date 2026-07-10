@@ -117,12 +117,17 @@ pub fn create_note(db_path: &Path, data_dir: &Path, request: &CreateNoteRequest)
     let conn = Connection::open(db_path)?;
     let id = Uuid::new_v4().to_string();
     
-    let folder = if request.folder.is_empty() { "Inbox" } else { &request.folder };
-    let folder_path = data_dir.join(folder);
+    let folder_path = if request.folder.is_empty() {
+        data_dir.to_path_buf()
+    } else {
+        data_dir.join(&request.folder)
+    };
     
-    if let Err(e) = fs::create_dir_all(&folder_path) {
-        log::error!("[ERROR] [NOTE] create_note failed: 创建目录失败: {}", e);
-        return Err(rusqlite::Error::QueryReturnedNoRows);
+    if !request.folder.is_empty() {
+        if let Err(e) = fs::create_dir_all(&folder_path) {
+            log::error!("[ERROR] [NOTE] create_note failed: 创建目录失败: {}", e);
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
     }
     
     let mut existing_indices = std::collections::HashSet::new();
@@ -160,7 +165,12 @@ pub fn create_note(db_path: &Path, data_dir: &Path, request: &CreateNoteRequest)
         (format!("未命名{}.md", next_index), format!("未命名{}", next_index))
     };
     
-    let relative_path = PathBuf::from(folder).join(&file_name);
+    let folder = if request.folder.is_empty() { "" } else { &request.folder };
+    let relative_path = if request.folder.is_empty() {
+        PathBuf::from(&file_name)
+    } else {
+        PathBuf::from(&request.folder).join(&file_name)
+    };
     let file_path = data_dir.join(&relative_path);
 
     log::info!("[NOTE] create note file start: {}", file_path.display());
@@ -421,7 +431,7 @@ pub fn rename_note(db_path: &Path, data_dir: &Path, id: &str, new_title: &str) -
     let old_full_path = data_dir.join(&old_relative_path);
     let new_full_path = data_dir.join(&new_relative_path);
     
-    std::fs::rename(&old_full_path, &new_full_path).map_err(|e| {
+    std::fs::rename(&old_full_path, &new_full_path).map_err(|_e| {
         rusqlite::Error::ExecuteReturnedResults
     })?;
     

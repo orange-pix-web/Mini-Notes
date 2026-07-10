@@ -67,6 +67,12 @@ pub struct RenameNoteRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct RenameFolderRequest {
+    pub old_path: String,
+    pub new_name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ApiResponse<T> {
     pub success: bool,
     pub message: String,
