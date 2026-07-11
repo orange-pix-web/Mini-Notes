@@ -126,6 +126,16 @@ export interface FileTreeVisibleItem {
   isExpanded?: boolean;
 }
 
+export interface SearchResultItem {
+  id: string;
+  type: "folder" | "note";
+  title: string;
+  path: string;
+  subtitle: string;
+  snippet?: string;
+  score?: number;
+}
+
 export interface RenameNoteRequest {
   id: string;
   new_title: string;

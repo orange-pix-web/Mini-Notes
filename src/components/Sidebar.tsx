@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { NavItem, NavOption } from "@/types";
 
 const quickNavOptions: NavOption[] = [
@@ -28,6 +27,7 @@ interface SidebarProps {
   version?: string;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
+  onOpenSearch?: () => void;
 }
 
 function Sidebar({ 
@@ -48,9 +48,8 @@ function Sidebar({
   version,
   collapsed = false,
   onToggleCollapsed,
+  onOpenSearch,
 }: SidebarProps) {
-  const [searchInput, setSearchInput] = useState("");
-
   const handleNewNoteClick = () => {
     console.log("[UI] new note button clicked");
     if (onNewNote) {
@@ -145,6 +144,18 @@ function Sidebar({
           {!collapsed && <span>{isCreating ? "创建中..." : "新建文件夹"}</span>}
         </button>
 
+        {collapsed && (
+          <button
+            type="button"
+            onClick={onOpenSearch}
+            className="flex items-center justify-center rounded-lg px-0 py-2.5 text-slate-500 hover:bg-slate-50 hover:text-blue-500 transition-colors"
+            title="全局搜索"
+            aria-label="全局搜索"
+          >
+            <span aria-hidden="true" className="text-lg">🔎</span>
+          </button>
+        )}
+
         {!collapsed && (
           <div className="mt-1 text-center text-xs">
             {isCreating && <span className="text-blue-500">创建中...</span>}
@@ -157,13 +168,16 @@ function Sidebar({
 
       {!collapsed && (
         <div className="px-2 pb-2">
-          <input
-            type="text"
-            placeholder="搜索..."
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            className="w-full px-3 py-1.5 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
-          />
+          <button
+            type="button"
+            onClick={onOpenSearch}
+            className="w-full flex items-center justify-between px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors"
+            title="全局搜索"
+            aria-label="全局搜索"
+          >
+            <span>搜索...</span>
+            <span className="rounded bg-white px-1.5 py-0.5 text-[10px] text-slate-400 border border-slate-200">⌘K</span>
+          </button>
         </div>
       )}
 
@@ -194,15 +208,17 @@ function Sidebar({
 
       <div className={`${collapsed ? "p-2" : "p-2"} border-t border-slate-200`}>
         {collapsed ? (
-          <button
-            type="button"
-            onClick={onDirChange}
-            className="w-full flex justify-center rounded-lg p-2 text-slate-500 hover:bg-slate-50 hover:text-blue-500 transition-colors"
-            title={currentDir || "~/MiniNotes"}
-            aria-label="更换文件夹"
-          >
-            <span aria-hidden="true">📂</span>
-          </button>
+          <div className="flex flex-col items-center gap-2">
+            <button
+              type="button"
+              onClick={onDirChange}
+              className="w-full flex justify-center rounded-lg p-2 text-slate-500 hover:bg-slate-50 hover:text-blue-500 transition-colors"
+              title={currentDir || "~/MiniNotes"}
+              aria-label="更换文件夹"
+            >
+              <span aria-hidden="true">📂</span>
+            </button>
+          </div>
         ) : (
           <div className="text-xs text-slate-400">
             <div>当前笔记文件夹</div>

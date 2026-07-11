@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { FileTreeNode, FileTreeVisibleItem } from "@/types";
 
 interface TreeClickModifiers {
@@ -56,6 +56,7 @@ function FileTree({
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [renamingName, setRenamingName] = useState("");
   const dragCounterRef = useRef(0);
+  const rootContainerRef = useRef<HTMLDivElement>(null);
 
   const isInteractiveTarget = (target: EventTarget | null) => {
     if (!(target instanceof HTMLElement)) {
@@ -153,6 +154,17 @@ function FileTree({
     setRenamingName("");
   };
 
+  useEffect(() => {
+    if (depth !== 0 || !focusedPath || !rootContainerRef.current) {
+      return;
+    }
+
+    const target = rootContainerRef.current.querySelector<HTMLElement>(`[data-tree-path="${encodeURIComponent(focusedPath)}"]`);
+    if (target) {
+      target.scrollIntoView({ block: "nearest" });
+    }
+  }, [focusedPath, depth, expandedFolders, tree]);
+
   const renderNode = (node: FileTreeNode) => {
     const isFolder = node.node_type === "folder";
     const isExpanded = expandedFolders.has(node.relative_path);
@@ -174,6 +186,7 @@ function FileTree({
     return (
       <div key={node.relative_path}>
         <div
+          data-tree-path={encodeURIComponent(node.relative_path)}
           onClick={(event) => onItemClick(item, getModifiers(event))}
           onDoubleClick={() => {
             if (isFolder) {
@@ -323,9 +336,10 @@ function FileTree({
   const isRootFocused = focusedPath === ROOT_PATH;
 
   return (
-    <div className="h-full flex flex-col">
+    <div ref={rootContainerRef} className="h-full flex flex-col">
       <div className="sticky top-0 z-10 bg-white">
         <div
+          data-tree-path={encodeURIComponent(ROOT_PATH)}
           onClick={(event) =>
             onItemClick(
               { path: ROOT_PATH, name: "根目录", type: "root", depth: 0, parentPath: null, isExpanded: true },

@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback } from "react";
 import Sidebar from "@/components/Sidebar";
 import NoteList from "@/components/NoteList";
 import Editor from "@/components/Editor";
-import { initApp, listNotes, createNote, createFolder, getWorkspaceInfo, setNotesRootDir, getFileTree, readFileNote, writeFileNote, renameFileNote, deleteFileNote, moveFile, deleteFolder, renameFolder, openFolder } from "@/api";
-import type { Note, NavItem, FileTreeNode, FileNotePayload } from "@/types";
+import SearchModal from "@/components/SearchModal";
+import { initApp, listNotes, createNote, createFolder, getWorkspaceInfo, setNotesRootDir, getFileTree, readFileNote, writeFileNote, renameFileNote, deleteFileNote, moveFile, deleteFolder, renameFolder, openFolder, searchNotes } from "@/api";
+import type { Note, NavItem, FileTreeNode, FileNotePayload, SearchResultItem } from "@/types";
 import { open } from "@tauri-apps/plugin-dialog";
 import packageJson from "../package.json";
 
@@ -34,6 +35,11 @@ function App() {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [showNewFolderModal, setShowNewFolderModal] = useState(false);
   const [newFolderName, setNewFolderName] = useState("新建文件夹");
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResultItem[]>([]);
+  const [selectedSearchIndex, setSelectedSearchIndex] = useState(0);
+  const [isSearchLoading, setIsSearchLoading] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") {
       return false;
@@ -51,6 +57,46 @@ function App() {
     }
     return fileTreePath;
   };
+
+  const getSearchScore = useCallback((query: string, title: string, path: string, snippet = "") => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const normalizedTitle = title.toLowerCase();
+    const normalizedPath = path.toLowerCase();
+    const normalizedSnippet = snippet.toLowerCase();
+
+    if (!normalizedQuery) {
+      return Number.MAX_SAFE_INTEGER;
+    }
+
+    if (normalizedTitle === normalizedQuery) return 0;
+    if (normalizedTitle.startsWith(normalizedQuery)) return 1;
+    if (normalizedTitle.includes(normalizedQuery)) return 2;
+    if (normalizedPath.endsWith(normalizedQuery)) return 3;
+    if (normalizedPath.includes(normalizedQuery)) return 4;
+    if (normalizedSnippet.includes(normalizedQuery)) return 5;
+    return 6;
+  }, []);
+
+  const buildSnippet = useCallback((summary: string, query: string) => {
+    const trimmedSummary = summary.trim();
+    if (!trimmedSummary) {
+      return "";
+    }
+
+    const normalizedQuery = query.trim().toLowerCase();
+    const normalizedSummary = trimmedSummary.toLowerCase();
+    const matchIndex = normalizedSummary.indexOf(normalizedQuery);
+
+    if (matchIndex === -1) {
+      return trimmedSummary.length > 80 ? `${trimmedSummary.slice(0, 80)}...` : trimmedSummary;
+    }
+
+    const start = Math.max(0, matchIndex - 24);
+    const end = Math.min(trimmedSummary.length, matchIndex + normalizedQuery.length + 36);
+    const prefix = start > 0 ? "..." : "";
+    const suffix = end < trimmedSummary.length ? "..." : "";
+    return `${prefix}${trimmedSummary.slice(start, end)}${suffix}`;
+  }, []);
 
   const loadNotes = useCallback(async (filter?: string, folder?: string) => {
     const currentFilter = filter || activeNav;
@@ -121,6 +167,170 @@ function App() {
     loadNotes();
   }, [activeNav, activeFolder, loadNotes]);
 
+  const expandFolderPath = useCallback((folderPath: string) => {
+    const segments = folderPath.split("/").filter(Boolean);
+    const foldersToExpand = new Set<string>();
+    let currentPath = "";
+
+    for (let i = 0; i < segments.length - 1; i += 1) {
+      currentPath = currentPath ? `${currentPath}/${segments[i]}` : segments[i];
+      foldersToExpand.add(currentPath);
+    }
+
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      foldersToExpand.forEach((path) => next.add(path));
+      return next;
+    });
+  }, []);
+
+  const flattenFileTreeItems = useCallback((nodes: FileTreeNode[]): SearchResultItem[] => {
+    const items: SearchResultItem[] = [];
+
+    const visit = (treeNodes: FileTreeNode[]) => {
+      for (const node of treeNodes) {
+        if (node.node_type === "folder") {
+          items.push({
+            id: `folder:${node.relative_path}`,
+            type: "folder",
+            title: node.name,
+            path: node.relative_path,
+            subtitle: node.relative_path ? `根目录/${node.relative_path}` : "根目录",
+          });
+        } else {
+          const folderPath = node.relative_path.includes("/") ? node.relative_path.slice(0, node.relative_path.lastIndexOf("/")) : "";
+          items.push({
+            id: `note-file:${node.relative_path}`,
+            type: "note",
+            title: node.name,
+            path: node.relative_path,
+            subtitle: folderPath || "根目录",
+          });
+        }
+
+        if (node.children.length > 0) {
+          visit(node.children);
+        }
+      }
+    };
+
+    visit(nodes);
+    return items;
+  }, []);
+
+  const handleOpenSearch = useCallback(() => {
+    setIsSearchOpen(true);
+  }, []);
+
+  const handleCloseSearch = useCallback(() => {
+    setIsSearchOpen(false);
+    setSearchQuery("");
+    setSearchResults([]);
+    setSelectedSearchIndex(0);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const primaryPressed = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? event.metaKey : event.ctrlKey;
+      if (!primaryPressed || event.key.toLowerCase() !== "k") {
+        return;
+      }
+
+      event.preventDefault();
+      setIsSearchOpen(true);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (!isSearchOpen) {
+      return;
+    }
+
+    const trimmedQuery = searchQuery.trim().toLowerCase();
+    if (!trimmedQuery) {
+      setSearchResults([]);
+      setSelectedSearchIndex(0);
+      setIsSearchLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setIsSearchLoading(true);
+
+      try {
+        const fileTreeItems = flattenFileTreeItems(fileTree);
+        const folderMatches = fileTreeItems
+          .filter((item) => item.type === "folder" && (
+            item.title.toLowerCase().includes(trimmedQuery) || item.path.toLowerCase().includes(trimmedQuery)
+          ))
+          .map((item) => ({
+            ...item,
+            score: getSearchScore(trimmedQuery, item.title, item.path),
+          }))
+          .sort((a, b) => (a.score ?? 99) - (b.score ?? 99) || a.path.localeCompare(b.path, "zh-Hans-CN"));
+
+        const noteFileMatches = fileTreeItems.filter((item) => item.type === "note" && (
+          item.title.toLowerCase().includes(trimmedQuery) || item.path.toLowerCase().includes(trimmedQuery)
+        ));
+
+        const response = await searchNotes({ query: searchQuery.trim() });
+        const noteMap = new Map<string, SearchResultItem>();
+
+        for (const item of noteFileMatches) {
+          noteMap.set(item.path, {
+            ...item,
+            score: getSearchScore(trimmedQuery, item.title, item.path),
+          });
+        }
+
+        if (response.success && response.data) {
+          for (const note of response.data) {
+            noteMap.set(note.relative_path, {
+              id: `note-db:${note.relative_path}`,
+              type: "note",
+              title: note.title || note.relative_path.split("/").pop() || note.relative_path,
+              path: note.relative_path,
+              subtitle: note.folder || "根目录",
+              snippet: buildSnippet(note.summary || "", searchQuery.trim()),
+              score: getSearchScore(
+                trimmedQuery,
+                note.title || note.relative_path.split("/").pop() || note.relative_path,
+                note.relative_path,
+                note.summary || "",
+              ),
+            });
+          }
+        }
+
+        if (!cancelled) {
+          const sortedNotes = Array.from(noteMap.values()).sort(
+            (a, b) => (a.score ?? 99) - (b.score ?? 99) || a.path.localeCompare(b.path, "zh-Hans-CN"),
+          );
+          setSearchResults([...folderMatches, ...sortedNotes]);
+          setSelectedSearchIndex(0);
+        }
+      } catch (error) {
+        console.error("[APP] search failed", error);
+        if (!cancelled) {
+          setSearchResults([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsSearchLoading(false);
+        }
+      }
+    }, 180);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [isSearchOpen, searchQuery, fileTree, flattenFileTreeItems, getSearchScore, buildSnippet]);
+
   const handleOpenFile = useCallback(async (relativePath: string) => {
     console.log("[APP] handleOpenFile START", relativePath);
     try {
@@ -143,6 +353,27 @@ function App() {
     }
     console.log("[APP] handleOpenFile END");
   }, []);
+
+  const handleSearchResultSelect = useCallback(async () => {
+    const selectedItem = searchResults[selectedSearchIndex];
+    if (!selectedItem) {
+      return;
+    }
+
+    if (selectedItem.type === "folder") {
+      expandFolderPath(selectedItem.path);
+      setActiveNav("folder");
+      setActiveFolder(selectedItem.path);
+    } else {
+      const folderPath = selectedItem.path.includes("/") ? selectedItem.path.slice(0, selectedItem.path.lastIndexOf("/")) : "";
+      if (folderPath) {
+        expandFolderPath(folderPath);
+      }
+      await handleOpenFile(selectedItem.path);
+    }
+
+    handleCloseSearch();
+  }, [searchResults, selectedSearchIndex, expandFolderPath, handleOpenFile, handleCloseSearch]);
 
   const handleNavChange = useCallback((nav: NavItem) => {
     setActiveNav(nav);
@@ -544,6 +775,7 @@ function App() {
         version={packageJson.version}
         collapsed={isSidebarCollapsed}
         onToggleCollapsed={() => setIsSidebarCollapsed((prev) => !prev)}
+        onOpenSearch={handleOpenSearch}
       />
       <NoteList 
         notes={notes}
@@ -571,6 +803,17 @@ function App() {
         onSaveFile={handleSaveFile}
         onDeleteFile={handleNoteDeleted}
         onRenameFile={handleRenameFile}
+      />
+      <SearchModal
+        isOpen={isSearchOpen}
+        query={searchQuery}
+        results={searchResults}
+        selectedIndex={selectedSearchIndex}
+        isLoading={isSearchLoading}
+        onQueryChange={setSearchQuery}
+        onClose={handleCloseSearch}
+        onSelectIndex={setSelectedSearchIndex}
+        onConfirmSelection={handleSearchResultSelect}
       />
     </div>
   );
