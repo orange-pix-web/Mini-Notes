@@ -57,12 +57,24 @@ function FileTree({
   const [renamingName, setRenamingName] = useState("");
   const dragCounterRef = useRef(0);
 
+  const isInteractiveTarget = (target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+    return Boolean(target.closest("button, input"));
+  };
+
   const getModifiers = (event: React.MouseEvent): TreeClickModifiers => ({
     isPrimaryPressed: navigator.platform.includes("Mac") ? event.metaKey : event.ctrlKey,
     isShiftPressed: event.shiftKey,
   });
 
   const handleDragStart = (event: React.DragEvent, path: string) => {
+    if (isInteractiveTarget(event.target)) {
+      event.preventDefault();
+      return;
+    }
+
     const dragPaths = onDragSelectionStart(path);
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", path);
@@ -190,6 +202,9 @@ function FileTree({
               <button
                 type="button"
                 className="text-slate-400 text-xs"
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                }}
                 onClick={(event) => {
                   event.stopPropagation();
                   onToggleFolder(node.relative_path);
@@ -231,6 +246,9 @@ function FileTree({
               <button
                 type="button"
                 draggable={false}
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                }}
                 onMouseDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -248,6 +266,9 @@ function FileTree({
             <button
               type="button"
               draggable={false}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+              }}
               onMouseDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation();
@@ -302,58 +323,63 @@ function FileTree({
   const isRootFocused = focusedPath === ROOT_PATH;
 
   return (
-    <div
-      className="overflow-y-auto"
-      onDragOver={(event) => {
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
-        onSetDropTarget(ROOT_PATH);
-      }}
-      onDrop={(event) => void handleRootDrop(event)}
-    >
+    <div className="h-full flex flex-col">
+      <div className="sticky top-0 z-10 bg-white">
+        <div
+          onClick={(event) =>
+            onItemClick(
+              { path: ROOT_PATH, name: "根目录", type: "root", depth: 0, parentPath: null, isExpanded: true },
+              getModifiers(event),
+            )
+          }
+          className={`group flex items-center gap-2 px-2 py-2 text-sm cursor-pointer transition-colors min-h-[40px] ${
+            dropTarget === ROOT_PATH ? "bg-blue-50 border border-blue-300 rounded-lg" :
+            isRootSelected ? "bg-blue-50 text-blue-600 font-medium" :
+            "hover:bg-slate-50"
+          } ${isRootFocused ? "ring-1 ring-blue-300 ring-inset" : ""}`}
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+            onSetDropTarget(ROOT_PATH);
+          }}
+          onDrop={(event) => void handleRootDrop(event)}
+        >
+          <span className="text-lg">📂</span>
+          <span className={isRootSelected ? "text-blue-600 font-medium" : "text-slate-600"}>根目录</span>
+          <button
+            type="button"
+            draggable={false}
+            onPointerDown={(event) => {
+              event.stopPropagation();
+            }}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenFolder(ROOT_PATH);
+            }}
+            className="opacity-45 p-1 text-slate-400 hover:text-blue-500 hover:opacity-100 transition-opacity ml-auto"
+            title="在系统文件夹中打开"
+            aria-label="在系统文件夹中打开"
+          >
+            <span aria-hidden="true">📂</span>
+          </button>
+          {draggedPaths.length > 0 && dropTarget === ROOT_PATH && (
+            <span className="text-xs text-blue-500">↓ 放置到这里</span>
+          )}
+        </div>
+
+        <div className="border-t border-slate-100 my-1"></div>
+      </div>
+
       <div
-        onClick={(event) =>
-          onItemClick(
-            { path: ROOT_PATH, name: "根目录", type: "root", depth: 0, parentPath: null, isExpanded: true },
-            getModifiers(event),
-          )
-        }
-        className={`group flex items-center gap-2 px-2 py-2 text-sm cursor-pointer transition-colors min-h-[40px] ${
-          dropTarget === ROOT_PATH ? "bg-blue-50 border border-blue-300 rounded-lg" :
-          isRootSelected ? "bg-blue-50 text-blue-600 font-medium" :
-          "hover:bg-slate-50"
-        } ${isRootFocused ? "ring-1 ring-blue-300 ring-inset" : ""}`}
+        className="flex-1 overflow-y-auto"
         onDragOver={(event) => {
           event.preventDefault();
           event.dataTransfer.dropEffect = "move";
-          onSetDropTarget(ROOT_PATH);
         }}
-        onDrop={(event) => void handleRootDrop(event)}
       >
-        <span className="text-lg">📂</span>
-        <span className={isRootSelected ? "text-blue-600 font-medium" : "text-slate-600"}>根目录</span>
-        <button
-          type="button"
-          draggable={false}
-          onMouseDown={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event.stopPropagation();
-            onOpenFolder(ROOT_PATH);
-          }}
-          className="opacity-45 p-1 text-slate-400 hover:text-blue-500 hover:opacity-100 transition-opacity ml-auto"
-          title="在系统文件夹中打开"
-          aria-label="在系统文件夹中打开"
-        >
-          <span aria-hidden="true">📂</span>
-        </button>
-        {draggedPaths.length > 0 && dropTarget === ROOT_PATH && (
-          <span className="text-xs text-blue-500">↓ 放置到这里</span>
-        )}
+        {tree.map(renderNode)}
       </div>
-
-      <div className="border-t border-slate-100 my-1"></div>
-
-      {tree.map(renderNode)}
 
       {showDeleteConfirm && itemToDelete && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">

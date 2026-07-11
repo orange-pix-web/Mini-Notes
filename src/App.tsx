@@ -5,6 +5,7 @@ import Editor from "@/components/Editor";
 import { initApp, listNotes, createNote, createFolder, getWorkspaceInfo, setNotesRootDir, getFileTree, readFileNote, writeFileNote, renameFileNote, deleteFileNote, moveFile, deleteFolder, renameFolder, openFolder } from "@/api";
 import type { Note, NavItem, FileTreeNode, FileNotePayload } from "@/types";
 import { open } from "@tauri-apps/plugin-dialog";
+import packageJson from "../package.json";
 
 console.log("[APP] App component loaded");
 console.log("[APP] readFileNote function:", typeof readFileNote);
@@ -33,6 +34,16 @@ function App() {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [showNewFolderModal, setShowNewFolderModal] = useState(false);
   const [newFolderName, setNewFolderName] = useState("新建文件夹");
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    return window.localStorage.getItem("sidebar_collapsed") === "true";
+  });
+
+  useEffect(() => {
+    window.localStorage.setItem("sidebar_collapsed", String(isSidebarCollapsed));
+  }, [isSidebarCollapsed]);
 
   const getDbFolderName = (fileTreePath: string): string => {
     if (fileTreePath.startsWith("Notes/")) {
@@ -530,6 +541,9 @@ function App() {
         onNewFolderConfirm={handleFolderCreated}
         onNewFolderCancel={() => setShowNewFolderModal(false)}
         currentFolderPath={activeFolder || '根目录'}
+        version={packageJson.version}
+        collapsed={isSidebarCollapsed}
+        onToggleCollapsed={() => setIsSidebarCollapsed((prev) => !prev)}
       />
       <NoteList 
         notes={notes}
