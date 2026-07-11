@@ -115,6 +115,17 @@ export interface FileTreeNode {
   children: FileTreeNode[];
 }
 
+export type FileTreeItemType = "root" | "folder" | "note";
+
+export interface FileTreeVisibleItem {
+  path: string;
+  name: string;
+  type: FileTreeItemType;
+  depth: number;
+  parentPath: string | null;
+  isExpanded?: boolean;
+}
+
 export interface RenameNoteRequest {
   id: string;
   new_title: string;

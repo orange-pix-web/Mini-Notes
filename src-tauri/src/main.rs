@@ -6,6 +6,7 @@
 use log::{info, error};
 use rusqlite::{Connection, Result as SqlResult};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use tauri::command;
 
 mod db;
@@ -388,9 +389,9 @@ fn delete_folder(folder_path: String) -> ApiResponse<()> {
         };
     }
     
-    match std::fs::remove_dir_all(&folder_full_path) {
+    match move_to_system_trash(&folder_full_path) {
         Ok(_) => {
-            info!("[FILE] delete_folder 成功删除文件夹: {}", folder_full_path.display());
+            info!("[FILE] delete_folder 已移入系统回收站: {}", folder_full_path.display());
             
             match db::delete_folder_notes(&db_path, &folder_path) {
                 Ok(_) => {
@@ -403,7 +404,7 @@ fn delete_folder(folder_path: String) -> ApiResponse<()> {
             
             ApiResponse {
                 success: true,
-                message: "文件夹删除成功".to_string(),
+                message: "文件夹已移入系统回收站".to_string(),
                 data: None,
             }
         }
@@ -411,7 +412,7 @@ fn delete_folder(folder_path: String) -> ApiResponse<()> {
             error!("[FILE] delete_folder 失败: {}", e);
             ApiResponse {
                 success: false,
-                message: format!("文件夹删除失败: {}", e),
+                message: format!("文件夹移入系统回收站失败: {}", e),
                 data: None,
             }
         }
@@ -1048,15 +1049,15 @@ fn delete_file_note(relative_path: String) -> ApiResponse<()> {
         };
     }
     
-    match std::fs::remove_file(&full_path) {
+    match move_to_system_trash(&full_path) {
         Ok(_) => {
-            info!("[FILE] 文件删除成功: {}", full_path.display());
+            info!("[FILE] 文件已移入系统回收站: {}", full_path.display());
             
             let _ = db::delete_note_by_path(&db_path, &relative_path);
             
             ApiResponse {
                 success: true,
-                message: "删除成功".to_string(),
+                message: "文件已移入系统回收站".to_string(),
                 data: Some(()),
             }
         }
@@ -1064,7 +1065,7 @@ fn delete_file_note(relative_path: String) -> ApiResponse<()> {
             error!("[FILE] 文件删除失败: {}", e);
             ApiResponse {
                 success: false,
-                message: format!("文件删除失败: {}", e),
+                message: format!("文件移入系统回收站失败: {}", e),
                 data: None,
             }
         }
@@ -1079,6 +1080,132 @@ fn get_notes_root_dir(db_path: &Path) -> SqlResult<PathBuf> {
     } else {
         let default = get_data_dir().join("Notes");
         Ok(default)
+    }
+}
+
+fn move_to_system_trash(path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let script = r#"on run argv
+set targetPath to POSIX file (item 1 of argv)
+tell application "Finder"
+    delete targetPath
+end tell
+end run"#;
+
+        return Command::new("osascript")
+            .arg("-e")
+            .arg(script)
+            .arg(path.as_os_str())
+            .status()
+            .map_err(|e| format!("执行 osascript 失败: {}", e))
+            .and_then(|status| {
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(format!("osascript 退出码异常: {:?}", status.code()))
+                }
+            });
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        trash::delete(path).map_err(|e| format!("移入系统回收站失败: {}", e))
+    }
+}
+
+#[command]
+fn open_folder(relative_path: String) -> ApiResponse<()> {
+    info!("[FOLDER] open_folder command called: relative_path={}", relative_path);
+
+    if relative_path.starts_with('/') || relative_path.starts_with('\\') {
+        error!("[FOLDER] open_folder 拒绝绝对路径");
+        return ApiResponse {
+            success: false,
+            message: "拒绝绝对路径".to_string(),
+            data: None,
+        };
+    }
+
+    if relative_path.contains("..") {
+        error!("[FOLDER] open_folder 路径包含非法字符");
+        return ApiResponse {
+            success: false,
+            message: "路径包含非法字符".to_string(),
+            data: None,
+        };
+    }
+
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+
+    let notes_root_dir = match get_notes_root_dir(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            error!("[FOLDER] open_folder 获取笔记根目录失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: "获取笔记根目录失败".to_string(),
+                data: None,
+            };
+        }
+    };
+
+    let target_path = if relative_path.is_empty() {
+        notes_root_dir
+    } else {
+        notes_root_dir.join(&relative_path)
+    };
+
+    if !target_path.exists() {
+        error!("[FOLDER] open_folder 文件夹不存在: {}", target_path.display());
+        return ApiResponse {
+            success: false,
+            message: "文件夹不存在".to_string(),
+            data: None,
+        };
+    }
+
+    if !target_path.is_dir() {
+        error!("[FOLDER] open_folder 不是文件夹: {}", target_path.display());
+        return ApiResponse {
+            success: false,
+            message: "不是文件夹".to_string(),
+            data: None,
+        };
+    }
+
+    #[cfg(target_os = "macos")]
+    let command_result = Command::new("open").arg(&target_path).status();
+
+    #[cfg(target_os = "windows")]
+    let command_result = Command::new("explorer").arg(&target_path).status();
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    let command_result = Command::new("xdg-open").arg(&target_path).status();
+
+    match command_result {
+        Ok(status) if status.success() => ApiResponse {
+            success: true,
+            message: "文件夹已打开".to_string(),
+            data: None,
+        },
+        Ok(status) => {
+            error!("[FOLDER] open_folder 打开失败，退出码: {:?}", status.code());
+            ApiResponse {
+                success: false,
+                message: "打开文件夹失败".to_string(),
+                data: None,
+            }
+        }
+        Err(e) => {
+            error!("[FOLDER] open_folder 执行失败: {}", e);
+            ApiResponse {
+                success: false,
+                message: format!("打开文件夹失败: {}", e),
+                data: None,
+            }
+        }
     }
 }
 
@@ -1396,6 +1523,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             get_file_tree,
             rename_note,
             rename_folder,
+            open_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

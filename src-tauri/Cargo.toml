@@ -1,6 +1,6 @@
 [package]
 name = "mini-notes"
-version = "0.1.1"
+version = "0.1.2"
 description = "A personal note-taking application"
 authors = ["Orange Pix Web"]
 license = "MIT"
@@ -25,3 +25,4 @@ log = "0.4"
 env_logger = "0.10"
 once_cell = "1.18"
 tauri-plugin-dialog = "2.0"
+trash = "5"

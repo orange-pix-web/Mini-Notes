@@ -193,3 +193,15 @@ export async function renameFolder(request: RenameFolderRequest): Promise<ApiRes
     throw error;
   }
 }
+
+export async function openFolder(relativePath = ""): Promise<ApiResponse<void>> {
+  console.log("[API] openFolder", relativePath);
+  try {
+    const result = await invoke<ApiResponse<void>>("open_folder", { relativePath });
+    console.log("[API] openFolder result", result);
+    return result;
+  } catch (error) {
+    console.error("[API] openFolder error", error);
+    throw error;
+  }
+}

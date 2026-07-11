@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import Sidebar from "@/components/Sidebar";
 import NoteList from "@/components/NoteList";
 import Editor from "@/components/Editor";
-import { initApp, listNotes, createNote, createFolder, getWorkspaceInfo, setNotesRootDir, getFileTree, readFileNote, writeFileNote, renameFileNote, deleteFileNote, moveFile, deleteFolder, renameFolder } from "@/api";
+import { initApp, listNotes, createNote, createFolder, getWorkspaceInfo, setNotesRootDir, getFileTree, readFileNote, writeFileNote, renameFileNote, deleteFileNote, moveFile, deleteFolder, renameFolder, openFolder } from "@/api";
 import type { Note, NavItem, FileTreeNode, FileNotePayload } from "@/types";
 import { open } from "@tauri-apps/plugin-dialog";
 
@@ -316,6 +316,26 @@ function App() {
     }
   }, [loadFileTree]);
 
+  const handleMoveFiles = useCallback(async (sourcePaths: string[], targetFolder: string) => {
+    console.log("[APP] handleMoveFiles", sourcePaths, targetFolder);
+
+    for (const sourcePath of sourcePaths) {
+      try {
+        const response = await moveFile({ source_path: sourcePath, target_folder: targetFolder });
+        console.log("[APP] batch moveFile response", sourcePath, response);
+        if (!response.success) {
+          console.error("[APP] batch moveFile failed", sourcePath, response.message || "Unknown error");
+          break;
+        }
+      } catch (error) {
+        console.error("[APP] batch moveFile failed with exception", sourcePath, error);
+        break;
+      }
+    }
+
+    await loadFileTree();
+  }, [loadFileTree]);
+
   const handleDeleteFolder = useCallback(async (folderPath: string) => {
     console.log("[APP] handleDeleteFolder", folderPath);
     
@@ -357,6 +377,19 @@ function App() {
       console.error("[APP] renameFolder failed with exception", error);
     }
   }, [loadFileTree, activeFolder]);
+
+  const handleOpenFolder = useCallback(async (relativePath: string) => {
+    console.log("[APP] handleOpenFolder", relativePath);
+
+    try {
+      const response = await openFolder(relativePath);
+      if (!response.success) {
+        console.error("[APP] openFolder failed", response.message || "Unknown error");
+      }
+    } catch (error) {
+      console.error("[APP] openFolder failed with exception", error);
+    }
+  }, []);
 
   const handleDirChange = useCallback(async () => {
     try {
@@ -400,6 +433,24 @@ function App() {
     setSelectedFile(null);
     loadNotes();
     loadFileTree();
+  }, [selectedFile, loadNotes, loadFileTree]);
+
+  const handleDeleteNoteFromTree = useCallback(async (relativePath: string) => {
+    console.log("[APP] handleDeleteNoteFromTree", relativePath);
+    try {
+      const response = await deleteFileNote(relativePath);
+      if (response.success) {
+        if (selectedFile?.relative_path === relativePath) {
+          setSelectedFile(null);
+        }
+        await loadNotes();
+        await loadFileTree();
+      } else {
+        console.error("[APP] deleteFileNote from tree failed", response.message);
+      }
+    } catch (error) {
+      console.error("[APP] Failed to delete file from tree:", error);
+    }
   }, [selectedFile, loadNotes, loadFileTree]);
 
   const handleSaveFile = useCallback(async (relativePath: string, content: string): Promise<boolean> => {
@@ -493,8 +544,13 @@ function App() {
         expandedFolders={expandedFolders}
         onToggleFolder={handleToggleFolder}
         onMoveFile={handleMoveFile}
+        onMoveFiles={handleMoveFiles}
         onDeleteFolder={handleDeleteFolder}
         onRenameFolder={handleRenameFolder}
+        onOpenFolder={handleOpenFolder}
+        onDeleteNote={handleDeleteNoteFromTree}
+        onNewNote={handleNoteCreated}
+        onNewFolder={handleNewFolderClick}
       />
       <Editor 
         file={selectedFile}
