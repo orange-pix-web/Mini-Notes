@@ -19,6 +19,8 @@ interface TreeClickModifiers {
   isShiftPressed: boolean;
 }
 
+type RootFolderSortMode = "name_asc" | "name_desc" | "updated_desc";
+
 interface NoteListProps {
   notes: Note[];
   selectedRelativePath: string | null;
@@ -105,18 +107,43 @@ function NoteList({
   const [selectionAnchorPath, setSelectionAnchorPath] = useState<string | null>(null);
   const [draggedPaths, setDraggedPaths] = useState<string[]>([]);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [rootFolderSortMode, setRootFolderSortMode] = useState<RootFolderSortMode>("name_asc");
   const treeContainerRef = useRef<HTMLDivElement>(null);
 
   const currentNav = navOptions.find((n) => n.id === activeNav);
   const navTitle = activeNav === "folder" ? folderName || "文件夹" : currentNav?.label || "笔记";
   const isMac = useMemo(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform), []);
 
+  const sortedFileTree = useMemo(() => {
+    const rootFolders = fileTree.filter((node) => node.node_type === "folder");
+    const rootFiles = fileTree.filter((node) => node.node_type !== "folder");
+    const collator = new Intl.Collator("zh-Hans-CN", { numeric: true, sensitivity: "base" });
+
+    const sortedFolders = [...rootFolders].sort((a, b) => {
+      if (rootFolderSortMode === "name_desc") {
+        return collator.compare(b.name, a.name);
+      }
+
+      if (rootFolderSortMode === "updated_desc") {
+        const timeA = a.modified_at ? Date.parse(a.modified_at) : 0;
+        const timeB = b.modified_at ? Date.parse(b.modified_at) : 0;
+        if (timeA !== timeB) {
+          return timeB - timeA;
+        }
+      }
+
+      return collator.compare(a.name, b.name);
+    });
+
+    return [...sortedFolders, ...rootFiles];
+  }, [fileTree, rootFolderSortMode]);
+
   const visibleItems = useMemo<FileTreeVisibleItem[]>(() => {
     return [
       { path: ROOT_PATH, name: "根目录", type: "root", depth: 0, parentPath: null, isExpanded: true },
-      ...buildVisibleItems(fileTree, expandedFolders),
+      ...buildVisibleItems(sortedFileTree, expandedFolders),
     ];
-  }, [fileTree, expandedFolders]);
+  }, [sortedFileTree, expandedFolders]);
 
   const visibleIndexMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -433,7 +460,20 @@ function NoteList({
         ) : (
           <div className="h-full flex flex-col">
             <div className="px-3 py-2 text-xs font-medium text-slate-400 uppercase tracking-wider bg-slate-50">
-              文件树 ({fileTree.length}个根节点)
+              <div className="flex items-center justify-between gap-2">
+                <span>文件树 ({fileTree.length}个根节点)</span>
+                <select
+                  value={rootFolderSortMode}
+                  onChange={(event) => setRootFolderSortMode(event.target.value as RootFolderSortMode)}
+                  className="max-w-[108px] rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-500 outline-none focus:border-blue-400"
+                  aria-label="根目录文件夹排序"
+                  title="根目录文件夹排序"
+                >
+                  <option value="name_asc">名称 A-Z</option>
+                  <option value="name_desc">名称 Z-A</option>
+                  <option value="updated_desc">最近更新</option>
+                </select>
+              </div>
             </div>
             <div
               ref={treeContainerRef}
@@ -445,7 +485,7 @@ function NoteList({
                 <div className="text-center text-slate-400 py-4">文件树为空</div>
               ) : (
                 <FileTree
-                  tree={fileTree}
+                  tree={sortedFileTree}
                   activeFolder={activeFolder}
                   expandedFolders={expandedFolders}
                   onToggleFolder={onToggleFolder}

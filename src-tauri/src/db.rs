@@ -46,12 +46,12 @@ pub fn run_migrations(conn: &Connection) -> SqlResult<()> {
 
         if count == 0 {
             conn.execute_batch(migration)?;
-            
+
             conn.execute(
                 "INSERT INTO schema_migrations (version, name, executed_at, success) VALUES (?, ?, ?, ?)",
                 params![version, name, now_str(), true],
             )?;
-            
+
             log::info!("[MIGRATION] {} 执行完成", name);
         }
     }
@@ -71,7 +71,7 @@ pub fn run_migrations(conn: &Connection) -> SqlResult<()> {
 pub fn get_setting(conn: &Connection, key: &str) -> SqlResult<Option<String>> {
     let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?")?;
     let mut rows = stmt.query(params![key])?;
-    
+
     if let Some(row) = rows.next()? {
         Ok(Some(row.get(0)?))
     } else {
@@ -111,25 +111,29 @@ fn extract_title(content: &str) -> Option<String> {
     }
 }
 
-pub fn create_note(db_path: &Path, data_dir: &Path, request: &CreateNoteRequest) -> SqlResult<Note> {
+pub fn create_note(
+    db_path: &Path,
+    data_dir: &Path,
+    request: &CreateNoteRequest,
+) -> SqlResult<Note> {
     log::info!("[NOTE] 开始创建笔记");
-    
+
     let conn = Connection::open(db_path)?;
     let id = Uuid::new_v4().to_string();
-    
+
     let folder_path = if request.folder.is_empty() {
         data_dir.to_path_buf()
     } else {
         data_dir.join(&request.folder)
     };
-    
+
     if !request.folder.is_empty() {
         if let Err(e) = fs::create_dir_all(&folder_path) {
             log::error!("[ERROR] [NOTE] create_note failed: 创建目录失败: {}", e);
             return Err(rusqlite::Error::QueryReturnedNoRows);
         }
     }
-    
+
     let mut existing_indices = std::collections::HashSet::new();
     let mut has_unnamed = false;
     if let Ok(entries) = fs::read_dir(&folder_path) {
@@ -148,7 +152,7 @@ pub fn create_note(db_path: &Path, data_dir: &Path, request: &CreateNoteRequest)
             }
         }
     }
-    
+
     let next_index = if !has_unnamed {
         0
     } else {
@@ -158,14 +162,21 @@ pub fn create_note(db_path: &Path, data_dir: &Path, request: &CreateNoteRequest)
         }
         index
     };
-    
+
     let (file_name, title) = if next_index == 0 {
         ("未命名.md".to_string(), "未命名".to_string())
     } else {
-        (format!("未命名{}.md", next_index), format!("未命名{}", next_index))
+        (
+            format!("未命名{}.md", next_index),
+            format!("未命名{}", next_index),
+        )
     };
-    
-    let folder = if request.folder.is_empty() { "" } else { &request.folder };
+
+    let folder = if request.folder.is_empty() {
+        ""
+    } else {
+        &request.folder
+    };
     let relative_path = if request.folder.is_empty() {
         PathBuf::from(&file_name)
     } else {
@@ -238,7 +249,7 @@ pub fn create_note(db_path: &Path, data_dir: &Path, request: &CreateNoteRequest)
 
 pub fn get_note(db_path: &Path, id: &str) -> SqlResult<Note> {
     let conn = Connection::open(db_path)?;
-    
+
     let note: Note = conn.query_row(
         "SELECT id, title, file_path, relative_path, folder, summary, is_favorite, is_pinned, status, created_at, updated_at, last_viewed_at, deleted_at 
          FROM notes WHERE id = ?",
@@ -272,7 +283,7 @@ pub fn get_note(db_path: &Path, id: &str) -> SqlResult<Note> {
 
 pub fn update_note(db_path: &Path, data_dir: &Path, id: &str, content: &str) -> SqlResult<Note> {
     let conn = Connection::open(db_path)?;
-    
+
     let note: Note = conn.query_row(
         "SELECT id, title, file_path, relative_path, folder, summary, is_favorite, is_pinned, status, created_at, updated_at, last_viewed_at, deleted_at 
          FROM notes WHERE id = ?",
@@ -334,7 +345,7 @@ pub fn update_note(db_path: &Path, data_dir: &Path, id: &str, content: &str) -> 
 
 pub fn list_notes(db_path: &Path, filter: &str, folder: Option<&str>) -> SqlResult<Vec<Note>> {
     let conn = Connection::open(db_path)?;
-    
+
     let (query, params) = match (filter, folder) {
         ("folder", Some(f)) => (
             "SELECT * FROM notes WHERE folder = ? AND deleted_at IS NULL ORDER BY is_pinned DESC, updated_at DESC",
@@ -387,37 +398,37 @@ pub fn list_notes(db_path: &Path, filter: &str, folder: Option<&str>) -> SqlResu
 
 pub fn rename_note(db_path: &Path, data_dir: &Path, id: &str, new_title: &str) -> SqlResult<Note> {
     let conn = Connection::open(db_path)?;
-    
-    let note: Note = conn.query_row(
-        "SELECT * FROM notes WHERE id = ?",
-        params![id],
-        |row| {
-            Ok(Note {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                file_path: row.get(2)?,
-                relative_path: row.get(3)?,
-                folder: row.get(4)?,
-                summary: row.get(5)?,
-                is_favorite: row.get(6)?,
-                is_pinned: row.get(7)?,
-                status: row.get(8)?,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
-                last_viewed_at: row.get(11)?,
-                deleted_at: row.get(12)?,
-            })
-        },
-    )?;
-    
+
+    let note: Note = conn.query_row("SELECT * FROM notes WHERE id = ?", params![id], |row| {
+        Ok(Note {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            file_path: row.get(2)?,
+            relative_path: row.get(3)?,
+            folder: row.get(4)?,
+            summary: row.get(5)?,
+            is_favorite: row.get(6)?,
+            is_pinned: row.get(7)?,
+            status: row.get(8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
+            last_viewed_at: row.get(11)?,
+            deleted_at: row.get(12)?,
+        })
+    })?;
+
     let safe_title = sanitize_filename(new_title);
-    let safe_title = if safe_title.is_empty() { "未命名笔记" } else { &safe_title };
-    
+    let safe_title = if safe_title.is_empty() {
+        "未命名笔记"
+    } else {
+        &safe_title
+    };
+
     let old_relative_path = PathBuf::from(&note.relative_path);
     let empty_path = PathBuf::from("");
     let parent_dir = old_relative_path.parent().unwrap_or(&empty_path);
     let new_file_name = format!("{}.md", safe_title);
-    
+
     let mut new_relative_path = parent_dir.join(&new_file_name);
     let mut counter = 1;
     while new_relative_path == old_relative_path || {
@@ -427,17 +438,16 @@ pub fn rename_note(db_path: &Path, data_dir: &Path, id: &str, new_title: &str) -
         new_relative_path = parent_dir.join(format!("{}_{}.md", safe_title, counter));
         counter += 1;
     }
-    
+
     let old_full_path = data_dir.join(&old_relative_path);
     let new_full_path = data_dir.join(&new_relative_path);
-    
-    std::fs::rename(&old_full_path, &new_full_path).map_err(|_e| {
-        rusqlite::Error::ExecuteReturnedResults
-    })?;
-    
+
+    std::fs::rename(&old_full_path, &new_full_path)
+        .map_err(|_e| rusqlite::Error::ExecuteReturnedResults)?;
+
     let now = now_str();
     let new_relative_path_str = new_relative_path.to_string_lossy().to_string();
-    
+
     let result: Note = conn.query_row(
         "UPDATE notes SET title = ?, relative_path = ?, file_path = ?, updated_at = ? WHERE id = ? RETURNING *",
         params![safe_title, new_relative_path_str, new_relative_path_str, now, id],
@@ -459,7 +469,7 @@ pub fn rename_note(db_path: &Path, data_dir: &Path, id: &str, new_title: &str) -
             })
         },
     )?;
-    
+
     Ok(result)
 }
 
@@ -473,7 +483,7 @@ fn sanitize_filename(name: &str) -> String {
 
 pub fn delete_note(db_path: &Path, id: &str) -> SqlResult<()> {
     let conn = Connection::open(db_path)?;
-    
+
     conn.execute(
         "UPDATE notes SET deleted_at = ?, status = 'deleted' WHERE id = ?",
         params![now_str(), id],
@@ -484,69 +494,69 @@ pub fn delete_note(db_path: &Path, id: &str) -> SqlResult<()> {
 
 pub fn update_note_path(db_path: &Path, old_path: &str, new_path: &str) -> SqlResult<()> {
     let conn = Connection::open(db_path)?;
-    
+
     let new_folder = match new_path.rfind('/') {
         Some(pos) => new_path[..pos].to_string(),
         None => "".to_string(),
     };
-    
+
     conn.execute(
         "UPDATE notes SET relative_path = ?, file_path = ?, folder = ?, updated_at = ? WHERE relative_path = ?",
         params![new_path, new_path, new_folder, now_str(), old_path],
     )?;
-    
+
     Ok(())
 }
 
 pub fn update_folder_path(db_path: &Path, old_path: &str, new_path: &str) -> SqlResult<()> {
     let conn = Connection::open(db_path)?;
-    
+
     let mut stmt = conn.prepare("SELECT relative_path FROM notes WHERE relative_path LIKE ?")?;
     let pattern = format!("{}%", old_path);
     let mut rows = stmt.query(params![pattern])?;
-    
+
     let mut paths_to_update = Vec::new();
     while let Some(row) = rows.next()? {
         let path: String = row.get(0)?;
         paths_to_update.push(path);
     }
-    
+
     for old_note_path in paths_to_update {
         let new_note_path = if old_note_path == old_path {
             new_path.to_string()
         } else {
             old_note_path.replacen(old_path, new_path, 1)
         };
-        
+
         let new_folder = match new_note_path.rfind('/') {
             Some(pos) => new_note_path[..pos].to_string(),
             None => "".to_string(),
         };
-        
+
         conn.execute(
             "UPDATE notes SET relative_path = ?, file_path = ?, folder = ?, updated_at = ? WHERE relative_path = ?",
             params![new_note_path, new_note_path, new_folder, now_str(), old_note_path],
         )?;
     }
-    
+
     Ok(())
 }
 
 pub fn delete_folder_notes(db_path: &Path, folder_path: &str) -> SqlResult<()> {
     let conn = Connection::open(db_path)?;
-    
+
     let pattern = format!("{}%", folder_path);
     conn.execute(
         "UPDATE notes SET deleted_at = ?, status = 'deleted' WHERE relative_path LIKE ?",
         params![now_str(), pattern],
     )?;
-    
+
     Ok(())
 }
 
 pub fn delete_note_by_path(db_path: &Path, relative_path: &str) -> SqlResult<()> {
     let conn = Connection::open(db_path)?;
-    
+
     conn.execute(
         "UPDATE notes SET deleted_at = ?, status = 'deleted' WHERE relative_path = ?",
         params![now_str(), relative_path],
@@ -557,15 +567,15 @@ pub fn delete_note_by_path(db_path: &Path, relative_path: &str) -> SqlResult<()>
 
 pub fn search_notes(db_path: &Path, query: &str) -> SqlResult<Vec<Note>> {
     let conn = Connection::open(db_path)?;
-    
+
     let pattern = format!("%{}%", query);
-    
+
     let mut stmt = conn.prepare(
         "SELECT * FROM notes 
          WHERE (title LIKE ? OR summary LIKE ?) AND deleted_at IS NULL 
          ORDER BY is_pinned DESC, updated_at DESC",
     )?;
-    
+
     let notes_iter = stmt.query_map(params![&pattern, &pattern], |row| {
         Ok(Note {
             id: row.get(0)?,
@@ -594,7 +604,7 @@ pub fn search_notes(db_path: &Path, query: &str) -> SqlResult<Vec<Note>> {
 
 pub fn add_tag(db_path: &Path, note_id: &str, tag_name: &str) -> SqlResult<()> {
     let conn = Connection::open(db_path)?;
-    
+
     conn.execute(
         "INSERT OR IGNORE INTO tags (name) VALUES (?)",
         params![tag_name],
@@ -616,7 +626,7 @@ pub fn add_tag(db_path: &Path, note_id: &str, tag_name: &str) -> SqlResult<()> {
 
 pub fn add_category(db_path: &Path, note_id: &str, category_name: &str) -> SqlResult<()> {
     let conn = Connection::open(db_path)?;
-    
+
     conn.execute(
         "INSERT OR IGNORE INTO categories (name) VALUES (?)",
         params![category_name],
@@ -638,7 +648,7 @@ pub fn add_category(db_path: &Path, note_id: &str, category_name: &str) -> SqlRe
 
 pub fn toggle_favorite(db_path: &Path, id: &str) -> SqlResult<Note> {
     let conn = Connection::open(db_path)?;
-    
+
     let updated_note: Note = conn.query_row(
         "UPDATE notes SET is_favorite = NOT is_favorite, updated_at = ? WHERE id = ? 
          RETURNING id, title, file_path, relative_path, folder, summary, is_favorite, is_pinned, status, created_at, updated_at, last_viewed_at, deleted_at",
@@ -667,7 +677,7 @@ pub fn toggle_favorite(db_path: &Path, id: &str) -> SqlResult<Note> {
 
 pub fn toggle_pinned(db_path: &Path, id: &str) -> SqlResult<Note> {
     let conn = Connection::open(db_path)?;
-    
+
     let updated_note: Note = conn.query_row(
         "UPDATE notes SET is_pinned = NOT is_pinned, updated_at = ? WHERE id = ? 
          RETURNING id, title, file_path, relative_path, folder, summary, is_favorite, is_pinned, status, created_at, updated_at, last_viewed_at, deleted_at",
@@ -709,7 +719,7 @@ pub fn scan_and_sync_notes(db_path: &Path, data_dir: &Path) {
     };
 
     let folders = vec!["", "Inbox", "Projects"];
-    
+
     for folder in folders {
         let folder_path = if folder.is_empty() {
             notes_dir.clone()
@@ -766,9 +776,9 @@ pub fn scan_and_sync_notes(db_path: &Path, data_dir: &Path) {
             let summary = get_summary(&content, 200);
             let now = now_str();
 
-            let mut stmt = match conn.prepare(
-                "SELECT COUNT(*) FROM notes WHERE id = ? AND deleted_at IS NULL"
-            ) {
+            let mut stmt = match conn
+                .prepare("SELECT COUNT(*) FROM notes WHERE id = ? AND deleted_at IS NULL")
+            {
                 Ok(s) => s,
                 Err(e) => {
                     log::error!("Failed to prepare query: {}", e);

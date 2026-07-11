@@ -112,6 +112,7 @@ export interface FileTreeNode {
   name: string;
   relative_path: string;
   node_type: string;
+  modified_at?: string | null;
   children: FileTreeNode[];
 }
 

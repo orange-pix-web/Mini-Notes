@@ -57,6 +57,7 @@ pub struct FileTreeNode {
     pub name: String,
     pub relative_path: String,
     pub node_type: String,
+    pub modified_at: Option<String>,
     pub children: Vec<FileTreeNode>,
 }
 

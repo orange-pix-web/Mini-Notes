@@ -30,7 +30,7 @@ impl AppLogger {
         };
         let module = format!("[{}]", record.module_path().unwrap_or("unknown"));
         let args = record.args().to_string();
-        
+
         format!("{} {} {} {}", now, level, module, args)
     }
 }
@@ -44,11 +44,13 @@ impl Log for AppLogger {
         if !self.enabled(record.metadata()) {
             return;
         }
-        
+
         let message = self.format_message(record);
         println!("{}", message);
-        
-        let log_file = self.log_dir.join(format!("{}.log", Local::now().format("%Y-%m-%d")));
+
+        let log_file = self
+            .log_dir
+            .join(format!("{}.log", Local::now().format("%Y-%m-%d")));
         if let Ok(mut file) = fs::OpenOptions::new()
             .create(true)
             .append(true)
