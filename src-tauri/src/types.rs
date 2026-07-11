@@ -52,6 +52,54 @@ pub struct SearchRequest {
     pub query: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CreateTaskRequest {
+    pub title: String,
+    pub content: String,
+    pub priority: String,
+    pub remind_at: Option<String>,
+    pub due_at: Option<String>,
+}
+
+impl Default for CreateTaskRequest {
+    fn default() -> Self {
+        CreateTaskRequest {
+            title: String::new(),
+            content: String::new(),
+            priority: "normal".to_string(),
+            remind_at: None,
+            due_at: None,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdateTaskRequest {
+    pub id: String,
+    pub title: String,
+    pub content: String,
+    pub completed: bool,
+    pub priority: String,
+    pub remind_at: Option<String>,
+    pub due_at: Option<String>,
+}
+
+impl Default for UpdateTaskRequest {
+    fn default() -> Self {
+        UpdateTaskRequest {
+            id: String::new(),
+            title: String::new(),
+            content: String::new(),
+            completed: false,
+            priority: "normal".to_string(),
+            remind_at: None,
+            due_at: None,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileTreeNode {
     pub name: String,

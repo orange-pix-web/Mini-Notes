@@ -82,12 +82,34 @@ export interface Attachment {
 
 export interface Task {
   id: string;
-  note_id: string;
+  title: string;
   content: string;
   completed: boolean;
+  priority: string;
+  remind_at?: string | null;
+  due_at?: string | null;
   completed_at?: string;
   created_at: string;
   updated_at: string;
+  deleted_at?: string | null;
+}
+
+export interface CreateTaskRequest {
+  title: string;
+  content: string;
+  priority: string;
+  remind_at?: string | null;
+  due_at?: string | null;
+}
+
+export interface UpdateTaskRequest {
+  id: string;
+  title: string;
+  content: string;
+  completed: boolean;
+  priority: string;
+  remind_at?: string | null;
+  due_at?: string | null;
 }
 
 export type NavItem =

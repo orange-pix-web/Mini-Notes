@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use crate::fs::write_atomic;
-use crate::types::CreateNoteRequest;
+use crate::types::{CreateNoteRequest, CreateTaskRequest, UpdateTaskRequest};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Note {
@@ -25,6 +25,20 @@ pub struct Note {
     pub deleted_at: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Todo {
+    pub id: String,
+    pub title: String,
+    pub content: String,
+    pub completed: bool,
+    pub priority: String,
+    pub remind_at: Option<String>,
+    pub due_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+}
+
 fn now_str() -> String {
     Local::now().to_rfc3339()
 }
@@ -34,6 +48,7 @@ pub fn run_migrations(conn: &Connection) -> SqlResult<()> {
         include_str!("../migrations/0001_initial.sql"),
         include_str!("../migrations/0002_add_tasks.sql"),
         include_str!("../migrations/0003_add_note_links.sql"),
+        include_str!("../migrations/0004_add_todos.sql"),
     ];
 
     for (idx, migration) in migrations.iter().enumerate() {
@@ -702,6 +717,133 @@ pub fn toggle_pinned(db_path: &Path, id: &str) -> SqlResult<Note> {
     )?;
 
     Ok(updated_note)
+}
+
+fn map_todo_row(row: &rusqlite::Row<'_>) -> SqlResult<Todo> {
+    Ok(Todo {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        content: row.get(2)?,
+        completed: row.get(3)?,
+        priority: row.get(4)?,
+        remind_at: row.get(5)?,
+        due_at: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+        deleted_at: row.get(9)?,
+    })
+}
+
+pub fn create_todo(db_path: &Path, request: &CreateTaskRequest) -> SqlResult<Todo> {
+    let conn = Connection::open(db_path)?;
+    let id = Uuid::new_v4().to_string();
+    let now = now_str();
+    let title = if request.title.trim().is_empty() {
+        "未命名待办".to_string()
+    } else {
+        request.title.trim().to_string()
+    };
+    let priority = if request.priority.trim().is_empty() {
+        "normal".to_string()
+    } else {
+        request.priority.trim().to_string()
+    };
+
+    conn.query_row(
+        "INSERT INTO todos (id, title, content, completed, priority, remind_at, due_at, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+         RETURNING id, title, content, completed, priority, remind_at, due_at, created_at, updated_at, deleted_at",
+        params![
+            id,
+            title,
+            request.content,
+            false,
+            priority,
+            request.remind_at,
+            request.due_at,
+            now,
+            now
+        ],
+        map_todo_row,
+    )
+}
+
+pub fn list_todos(db_path: &Path, include_deleted: bool) -> SqlResult<Vec<Todo>> {
+    let conn = Connection::open(db_path)?;
+    let query = if include_deleted {
+        "SELECT id, title, content, completed, priority, remind_at, due_at, created_at, updated_at, deleted_at
+         FROM todos WHERE deleted_at IS NOT NULL
+         ORDER BY deleted_at DESC, updated_at DESC"
+    } else {
+        "SELECT id, title, content, completed, priority, remind_at, due_at, created_at, updated_at, deleted_at
+         FROM todos WHERE deleted_at IS NULL
+         ORDER BY completed ASC,
+                  CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END ASC,
+                  CASE WHEN due_at IS NULL OR due_at = '' THEN 1 ELSE 0 END ASC,
+                  due_at ASC,
+                  updated_at DESC"
+    };
+
+    let mut stmt = conn.prepare(query)?;
+    let rows = stmt.query_map([], map_todo_row)?;
+    rows.collect()
+}
+
+pub fn update_todo(db_path: &Path, request: &UpdateTaskRequest) -> SqlResult<Todo> {
+    let conn = Connection::open(db_path)?;
+    let now = now_str();
+    let title = if request.title.trim().is_empty() {
+        "未命名待办".to_string()
+    } else {
+        request.title.trim().to_string()
+    };
+    let priority = if request.priority.trim().is_empty() {
+        "normal".to_string()
+    } else {
+        request.priority.trim().to_string()
+    };
+
+    conn.query_row(
+        "UPDATE todos
+         SET title = ?, content = ?, completed = ?, priority = ?, remind_at = ?, due_at = ?, updated_at = ?
+         WHERE id = ? AND deleted_at IS NULL
+         RETURNING id, title, content, completed, priority, remind_at, due_at, created_at, updated_at, deleted_at",
+        params![
+            title,
+            request.content,
+            request.completed,
+            priority,
+            request.remind_at,
+            request.due_at,
+            now,
+            request.id
+        ],
+        map_todo_row,
+    )
+}
+
+pub fn delete_todo(db_path: &Path, id: &str) -> SqlResult<()> {
+    let conn = Connection::open(db_path)?;
+    conn.execute(
+        "UPDATE todos SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+        params![now_str(), now_str(), id],
+    )?;
+    Ok(())
+}
+
+pub fn restore_todo(db_path: &Path, id: &str) -> SqlResult<()> {
+    let conn = Connection::open(db_path)?;
+    conn.execute(
+        "UPDATE todos SET deleted_at = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL",
+        params![now_str(), id],
+    )?;
+    Ok(())
+}
+
+pub fn permanently_delete_todo(db_path: &Path, id: &str) -> SqlResult<()> {
+    let conn = Connection::open(db_path)?;
+    conn.execute("DELETE FROM todos WHERE id = ?", params![id])?;
+    Ok(())
 }
 
 pub fn scan_and_sync_notes(db_path: &Path, data_dir: &Path) {

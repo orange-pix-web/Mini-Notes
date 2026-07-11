@@ -2,7 +2,7 @@ import type { NavItem, NavOption } from "@/types";
 
 const quickNavOptions: NavOption[] = [
   { id: "all", label: "全部笔记", icon: "📝" },
-  { id: "favorite", label: "收藏", icon: "⭐" },
+  { id: "tasks", label: "待办", icon: "✅" },
   { id: "trash", label: "回收站", icon: "🗑️" },
 ];
 

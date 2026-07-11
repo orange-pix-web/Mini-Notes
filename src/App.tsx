@@ -3,8 +3,10 @@ import Sidebar from "@/components/Sidebar";
 import NoteList from "@/components/NoteList";
 import Editor from "@/components/Editor";
 import SearchModal from "@/components/SearchModal";
-import { initApp, listNotes, createNote, createFolder, getWorkspaceInfo, setNotesRootDir, getFileTree, readFileNote, writeFileNote, renameFileNote, deleteFileNote, moveFile, deleteFolder, renameFolder, openFolder, searchNotes } from "@/api";
-import type { Note, NavItem, FileTreeNode, FileNotePayload, SearchResultItem } from "@/types";
+import TaskWorkspace from "@/components/TaskWorkspace";
+import TrashWorkspace from "@/components/TrashWorkspace";
+import { initApp, listNotes, createNote, createFolder, getWorkspaceInfo, setNotesRootDir, getFileTree, readFileNote, writeFileNote, renameFileNote, deleteFileNote, moveFile, deleteFolder, renameFolder, openFolder, searchNotes, listTasks, createTask, updateTask, deleteTask, restoreTask, permanentlyDeleteTask } from "@/api";
+import type { Note, NavItem, FileTreeNode, FileNotePayload, SearchResultItem, Task, UpdateTaskRequest } from "@/types";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
 
@@ -22,6 +24,10 @@ window.addEventListener('unhandledrejection', (e) => {
 function App() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [selectedFile, setSelectedFile] = useState<FileNotePayload | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [deletedTasks, setDeletedTasks] = useState<Task[]>([]);
+  const [selectedDeletedTaskId, setSelectedDeletedTaskId] = useState<string | null>(null);
   const [activeNav, setActiveNav] = useState<NavItem>("all");
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [fileTree, setFileTree] = useState<FileTreeNode[]>([]);
@@ -146,6 +152,32 @@ function App() {
     }
   }, [activeNav, activeFolder]);
 
+  const loadActiveTasks = useCallback(async () => {
+    try {
+      const response = await listTasks(false);
+      if (response.success && response.data) {
+        const loadedTasks = response.data;
+        setTasks(loadedTasks);
+        setSelectedTaskId((prev) => prev && loadedTasks.some((task) => task.id === prev) ? prev : loadedTasks[0]?.id ?? null);
+      }
+    } catch (error) {
+      console.error("[APP] Failed to load tasks:", error);
+    }
+  }, []);
+
+  const loadDeletedTasks = useCallback(async () => {
+    try {
+      const response = await listTasks(true);
+      if (response.success && response.data) {
+        const loadedTasks = response.data;
+        setDeletedTasks(loadedTasks);
+        setSelectedDeletedTaskId((prev) => prev && loadedTasks.some((task) => task.id === prev) ? prev : loadedTasks[0]?.id ?? null);
+      }
+    } catch (error) {
+      console.error("[APP] Failed to load deleted tasks:", error);
+    }
+  }, []);
+
   const loadFileTree = useCallback(async () => {
     setIsFileTreeLoading(true);
     try {
@@ -175,20 +207,32 @@ function App() {
         }
         await loadNotes();
         await loadFileTree();
+        await loadActiveTasks();
+        await loadDeletedTasks();
       } catch (error) {
         console.error("Initialization failed:", error);
       }
     };
     initialize();
-  }, [loadNotes, loadFileTree]);
+  }, [loadNotes, loadFileTree, loadActiveTasks, loadDeletedTasks]);
 
   useEffect(() => {
     console.log("[APP] fileTree state changed:", fileTree.length, "nodes");
   }, [fileTree]);
 
   useEffect(() => {
-    loadNotes();
-  }, [activeNav, activeFolder, loadNotes]);
+    if (activeNav === "tasks") {
+      void loadActiveTasks();
+      return;
+    }
+
+    if (activeNav === "trash") {
+      void loadDeletedTasks();
+      return;
+    }
+
+    void loadNotes();
+  }, [activeNav, activeFolder, loadNotes, loadActiveTasks, loadDeletedTasks]);
 
   const expandFolderPath = useCallback((folderPath: string) => {
     const segments = folderPath.split("/").filter(Boolean);
@@ -404,12 +448,106 @@ function App() {
   const handleNavChange = useCallback((nav: NavItem) => {
     setActiveNav(nav);
     setActiveFolder(null);
+    if (nav === "tasks" || nav === "trash") {
+      setSelectedFile(null);
+    }
   }, []);
 
   const handleFolderChange = useCallback((folder: string) => {
     setActiveNav("folder");
     setActiveFolder(folder);
   }, []);
+
+  const handleTaskCreated = useCallback(async () => {
+    const response = await createTask({
+      title: "新待办",
+      content: "",
+      priority: "normal",
+      remind_at: null,
+      due_at: null,
+    });
+    if (response.success && response.data) {
+      await loadActiveTasks();
+      setActiveNav("tasks");
+      setSelectedTaskId(response.data.id);
+    }
+  }, [loadActiveTasks]);
+
+  const handleTaskSaved = useCallback(async (request: UpdateTaskRequest): Promise<Task | null> => {
+    try {
+      const response = await updateTask(request);
+      if (response.success && response.data) {
+        await loadActiveTasks();
+        await loadDeletedTasks();
+        setSelectedTaskId(response.data.id);
+        return response.data;
+      }
+      return null;
+    } catch (error) {
+      console.error("[APP] Failed to save task:", error);
+      return null;
+    }
+  }, [loadActiveTasks, loadDeletedTasks]);
+
+  const handleTaskDeleted = useCallback(async (id: string) => {
+    const ok = window.confirm("确定删除这个待办吗？删除后会进入应用内回收站。");
+    if (!ok) {
+      return;
+    }
+
+    try {
+      await deleteTask(id);
+      await loadActiveTasks();
+      await loadDeletedTasks();
+    } catch (error) {
+      console.error("[APP] Failed to delete task:", error);
+    }
+  }, [loadActiveTasks, loadDeletedTasks]);
+
+  const handleTaskCompletedToggle = useCallback(async (task: Task, completed: boolean) => {
+    try {
+      await updateTask({
+        id: task.id,
+        title: task.title,
+        content: task.content,
+        completed,
+        priority: task.priority,
+        remind_at: task.remind_at ?? null,
+        due_at: task.due_at ?? null,
+      });
+      await loadActiveTasks();
+      await loadDeletedTasks();
+      if (selectedTaskId === task.id) {
+        setSelectedTaskId(task.id);
+      }
+    } catch (error) {
+      console.error("[APP] Failed to toggle task completed:", error);
+    }
+  }, [loadActiveTasks, loadDeletedTasks, selectedTaskId]);
+
+  const handleTaskRestored = useCallback(async (id: string) => {
+    try {
+      await restoreTask(id);
+      await loadActiveTasks();
+      await loadDeletedTasks();
+    } catch (error) {
+      console.error("[APP] Failed to restore task:", error);
+    }
+  }, [loadActiveTasks, loadDeletedTasks]);
+
+  const handleTaskPermanentDelete = useCallback(async (id: string) => {
+    const ok = window.confirm("确定彻底删除这个待办吗？此操作无法恢复。");
+    if (!ok) {
+      return;
+    }
+
+    try {
+      await permanentlyDeleteTask(id);
+      await loadDeletedTasks();
+    } catch (error) {
+      console.error("[APP] Failed to permanently delete task:", error);
+    }
+  }, [loadDeletedTasks]);
 
   const handleToggleFolder = useCallback((relativePath: string) => {
     setExpandedFolders(prev => {
@@ -773,7 +911,7 @@ function App() {
       tags: "标签",
       categories: "分类",
       projects: "项目",
-      tasks: "任务",
+      tasks: "待办",
       attachments: "附件",
       trash: "回收站",
       folder: "文件夹",
@@ -803,35 +941,57 @@ function App() {
         onToggleCollapsed={() => setIsSidebarCollapsed((prev) => !prev)}
         onOpenSearch={handleOpenSearch}
       />
-      <NoteList 
-        notes={notes}
-        selectedRelativePath={selectedFile?.relative_path || null}
-        isLoading={isLoading || isFileTreeLoading}
-        activeNav={activeNav}
-        folderName={getCurrentFolderName()}
-        fileTree={fileTree}
-        activeFolder={activeFolder}
-        onFolderChange={handleFolderChange}
-        onOpenFile={handleOpenFile}
-        expandedFolders={expandedFolders}
-        onToggleFolder={handleToggleFolder}
-        onMoveFile={handleMoveFile}
-        onMoveFiles={handleMoveFiles}
-        onDeleteFolder={handleDeleteFolder}
-        onRenameFolder={handleRenameFolder}
-        onOpenFolder={handleOpenFolder}
-        onDeleteNote={handleDeleteNoteFromTree}
-        onNewNote={handleNoteCreated}
-        onNewFolder={handleNewFolderClick}
-        revealPath={treeRevealPath}
-        onRevealHandled={() => setTreeRevealPath(null)}
-      />
-      <Editor 
-        file={selectedFile}
-        onSaveFile={handleSaveFile}
-        onDeleteFile={handleNoteDeleted}
-        onRenameFile={handleRenameFile}
-      />
+      {activeNav === "tasks" ? (
+        <TaskWorkspace
+          tasks={tasks}
+          selectedTaskId={selectedTaskId}
+          onSelectTask={setSelectedTaskId}
+          onCreateTask={handleTaskCreated}
+          onSaveTask={handleTaskSaved}
+          onDeleteTask={handleTaskDeleted}
+          onToggleTaskCompleted={handleTaskCompletedToggle}
+        />
+      ) : activeNav === "trash" ? (
+        <TrashWorkspace
+          tasks={deletedTasks}
+          selectedTaskId={selectedDeletedTaskId}
+          onSelectTask={setSelectedDeletedTaskId}
+          onRestoreTask={handleTaskRestored}
+          onPermanentlyDeleteTask={handleTaskPermanentDelete}
+        />
+      ) : (
+        <>
+          <NoteList 
+            notes={notes}
+            selectedRelativePath={selectedFile?.relative_path || null}
+            isLoading={isLoading || isFileTreeLoading}
+            activeNav={activeNav}
+            folderName={getCurrentFolderName()}
+            fileTree={fileTree}
+            activeFolder={activeFolder}
+            onFolderChange={handleFolderChange}
+            onOpenFile={handleOpenFile}
+            expandedFolders={expandedFolders}
+            onToggleFolder={handleToggleFolder}
+            onMoveFile={handleMoveFile}
+            onMoveFiles={handleMoveFiles}
+            onDeleteFolder={handleDeleteFolder}
+            onRenameFolder={handleRenameFolder}
+            onOpenFolder={handleOpenFolder}
+            onDeleteNote={handleDeleteNoteFromTree}
+            onNewNote={handleNoteCreated}
+            onNewFolder={handleNewFolderClick}
+            revealPath={treeRevealPath}
+            onRevealHandled={() => setTreeRevealPath(null)}
+          />
+          <Editor 
+            file={selectedFile}
+            onSaveFile={handleSaveFile}
+            onDeleteFile={handleNoteDeleted}
+            onRenameFile={handleRenameFile}
+          />
+        </>
+      )}
       <SearchModal
         isOpen={isSearchOpen}
         query={searchQuery}

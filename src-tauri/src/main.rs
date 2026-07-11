@@ -14,10 +14,10 @@ mod fs;
 mod logger;
 mod types;
 
-use db::Note;
+use db::{Note, Todo};
 use types::{
-    ApiResponse, AppState, CreateNoteRequest, FileNotePayload, RenameFolderRequest,
-    RenameNoteRequest, SearchRequest, UpdateNoteRequest,
+    ApiResponse, AppState, CreateNoteRequest, CreateTaskRequest, FileNotePayload,
+    RenameFolderRequest, RenameNoteRequest, SearchRequest, UpdateNoteRequest, UpdateTaskRequest,
 };
 
 fn get_data_dir() -> PathBuf {
@@ -583,6 +583,120 @@ fn delete_note(id: String) -> ApiResponse<()> {
                 data: None,
             }
         }
+    }
+}
+
+#[command]
+fn create_todo(request: CreateTaskRequest) -> ApiResponse<Todo> {
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+
+    match db::create_todo(&db_path, &request) {
+        Ok(todo) => ApiResponse {
+            success: true,
+            message: "待办创建成功".to_string(),
+            data: Some(todo),
+        },
+        Err(e) => ApiResponse {
+            success: false,
+            message: format!("待办创建失败: {}", e),
+            data: None,
+        },
+    }
+}
+
+#[command]
+fn list_todos(include_deleted: Option<bool>) -> ApiResponse<Vec<Todo>> {
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+
+    match db::list_todos(&db_path, include_deleted.unwrap_or(false)) {
+        Ok(todos) => ApiResponse {
+            success: true,
+            message: "获取待办列表成功".to_string(),
+            data: Some(todos),
+        },
+        Err(e) => ApiResponse {
+            success: false,
+            message: format!("获取待办列表失败: {}", e),
+            data: None,
+        },
+    }
+}
+
+#[command]
+fn update_todo(request: UpdateTaskRequest) -> ApiResponse<Todo> {
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+
+    match db::update_todo(&db_path, &request) {
+        Ok(todo) => ApiResponse {
+            success: true,
+            message: "待办更新成功".to_string(),
+            data: Some(todo),
+        },
+        Err(e) => ApiResponse {
+            success: false,
+            message: format!("待办更新失败: {}", e),
+            data: None,
+        },
+    }
+}
+
+#[command]
+fn delete_todo(id: String) -> ApiResponse<()> {
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+
+    match db::delete_todo(&db_path, &id) {
+        Ok(_) => ApiResponse {
+            success: true,
+            message: "待办已移入回收站".to_string(),
+            data: None,
+        },
+        Err(e) => ApiResponse {
+            success: false,
+            message: format!("待办删除失败: {}", e),
+            data: None,
+        },
+    }
+}
+
+#[command]
+fn restore_todo(id: String) -> ApiResponse<()> {
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+
+    match db::restore_todo(&db_path, &id) {
+        Ok(_) => ApiResponse {
+            success: true,
+            message: "待办已还原".to_string(),
+            data: None,
+        },
+        Err(e) => ApiResponse {
+            success: false,
+            message: format!("待办还原失败: {}", e),
+            data: None,
+        },
+    }
+}
+
+#[command]
+fn permanently_delete_todo(id: String) -> ApiResponse<()> {
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+
+    match db::permanently_delete_todo(&db_path, &id) {
+        Ok(_) => ApiResponse {
+            success: true,
+            message: "待办已彻底删除".to_string(),
+            data: None,
+        },
+        Err(e) => ApiResponse {
+            success: false,
+            message: format!("待办彻底删除失败: {}", e),
+            data: None,
+        },
     }
 }
 
@@ -1629,6 +1743,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             update_note,
             list_notes,
             delete_note,
+            create_todo,
+            list_todos,
+            update_todo,
+            delete_todo,
+            restore_todo,
+            permanently_delete_todo,
             search_notes,
             add_tag,
             add_category,

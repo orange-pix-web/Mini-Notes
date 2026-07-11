@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Note, CreateNoteRequest, CreateFolderRequest, UpdateNoteRequest, SearchRequest, ApiResponse, FileTreeNode, RenameNoteRequest, FileNotePayload, MoveFileRequest, RenameFolderRequest } from "@/types";
+import type { Note, CreateNoteRequest, CreateFolderRequest, UpdateNoteRequest, SearchRequest, ApiResponse, FileTreeNode, RenameNoteRequest, FileNotePayload, MoveFileRequest, RenameFolderRequest, Task, CreateTaskRequest, UpdateTaskRequest } from "@/types";
 
 export async function initApp(): Promise<ApiResponse<{ data_dir: string; db_path: string }>> {
   return invoke("init_app");
@@ -204,4 +204,28 @@ export async function openFolder(relativePath = ""): Promise<ApiResponse<void>> 
     console.error("[API] openFolder error", error);
     throw error;
   }
+}
+
+export async function createTask(request?: CreateTaskRequest): Promise<ApiResponse<Task>> {
+  return invoke("create_todo", { request: request || {} });
+}
+
+export async function listTasks(includeDeleted = false): Promise<ApiResponse<Task[]>> {
+  return invoke("list_todos", { includeDeleted });
+}
+
+export async function updateTask(request: UpdateTaskRequest): Promise<ApiResponse<Task>> {
+  return invoke("update_todo", { request });
+}
+
+export async function deleteTask(id: string): Promise<ApiResponse<void>> {
+  return invoke("delete_todo", { id });
+}
+
+export async function restoreTask(id: string): Promise<ApiResponse<void>> {
+  return invoke("restore_todo", { id });
+}
+
+export async function permanentlyDeleteTask(id: string): Promise<ApiResponse<void>> {
+  return invoke("permanently_delete_todo", { id });
 }
