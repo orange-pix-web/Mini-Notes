@@ -41,9 +41,30 @@ interface NoteListProps {
   onDeleteNote: (relativePath: string) => void;
   onNewNote: () => void;
   onNewFolder: () => void;
+  revealPath?: string | null;
+  onRevealHandled?: () => void;
 }
 
 const ROOT_PATH = "";
+
+function getNearestVisiblePath(
+  path: string,
+  visibleIndexMap: Map<string, number>,
+): string | null {
+  if (visibleIndexMap.has(path)) {
+    return path;
+  }
+
+  let currentPath = path;
+  while (currentPath.includes("/")) {
+    currentPath = currentPath.slice(0, currentPath.lastIndexOf("/"));
+    if (visibleIndexMap.has(currentPath)) {
+      return currentPath;
+    }
+  }
+
+  return visibleIndexMap.has(ROOT_PATH) ? ROOT_PATH : null;
+}
 
 function buildVisibleItems(
   tree: FileTreeNode[],
@@ -101,6 +122,8 @@ function NoteList({
   onDeleteNote,
   onNewNote,
   onNewFolder,
+  revealPath,
+  onRevealHandled,
 }: NoteListProps) {
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [focusedPath, setFocusedPath] = useState<string | null>(null);
@@ -178,15 +201,52 @@ function NoteList({
   }, [selectedRelativePath, activeNav, activeFolder, syncSingleSelection]);
 
   useEffect(() => {
+    if (!revealPath) {
+      return;
+    }
+
+    const resolvedPath = getNearestVisiblePath(revealPath, visibleIndexMap);
+    if (!resolvedPath) {
+      return;
+    }
+
+    syncSingleSelection(resolvedPath);
+    onRevealHandled?.();
+  }, [revealPath, visibleIndexMap, syncSingleSelection, onRevealHandled]);
+
+  useEffect(() => {
     setSelectedPaths((prev) => {
       const next = new Set(Array.from(prev).filter((path) => visibleIndexMap.has(path)));
+      if (next.size === 0 && prev.size > 0) {
+        const fallbackPath = getNearestVisiblePath(Array.from(prev)[0], visibleIndexMap);
+        if (fallbackPath) {
+          next.add(fallbackPath);
+        }
+      }
       const prevPaths = Array.from(prev).sort().join("|");
       const nextPaths = Array.from(next).sort().join("|");
       return prevPaths === nextPaths ? prev : next;
     });
 
-    setFocusedPath((prev) => (prev && visibleIndexMap.has(prev) ? prev : visibleItems[0]?.path ?? null));
-    setSelectionAnchorPath((prev) => (prev && visibleIndexMap.has(prev) ? prev : visibleItems[0]?.path ?? null));
+    setFocusedPath((prev) => {
+      if (prev && visibleIndexMap.has(prev)) {
+        return prev;
+      }
+      if (prev) {
+        return getNearestVisiblePath(prev, visibleIndexMap) ?? visibleItems[0]?.path ?? null;
+      }
+      return visibleItems[0]?.path ?? null;
+    });
+
+    setSelectionAnchorPath((prev) => {
+      if (prev && visibleIndexMap.has(prev)) {
+        return prev;
+      }
+      if (prev) {
+        return getNearestVisiblePath(prev, visibleIndexMap) ?? visibleItems[0]?.path ?? null;
+      }
+      return visibleItems[0]?.path ?? null;
+    });
   }, [visibleIndexMap, visibleItems]);
 
   const getTargetDisplayName = () => {

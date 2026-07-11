@@ -161,9 +161,9 @@ function FileTree({
 
     const target = rootContainerRef.current.querySelector<HTMLElement>(`[data-tree-path="${encodeURIComponent(focusedPath)}"]`);
     if (target) {
-      target.scrollIntoView({ block: "nearest" });
+      target.scrollIntoView({ block: "center" });
     }
-  }, [focusedPath, depth, expandedFolders, tree]);
+  }, [focusedPath, depth]);
 
   const renderNode = (node: FileTreeNode) => {
     const isFolder = node.node_type === "folder";

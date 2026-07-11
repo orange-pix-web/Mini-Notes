@@ -6,7 +6,7 @@ import SearchModal from "@/components/SearchModal";
 import { initApp, listNotes, createNote, createFolder, getWorkspaceInfo, setNotesRootDir, getFileTree, readFileNote, writeFileNote, renameFileNote, deleteFileNote, moveFile, deleteFolder, renameFolder, openFolder, searchNotes } from "@/api";
 import type { Note, NavItem, FileTreeNode, FileNotePayload, SearchResultItem } from "@/types";
 import { open } from "@tauri-apps/plugin-dialog";
-import packageJson from "../package.json";
+import { getVersion } from "@tauri-apps/api/app";
 
 console.log("[APP] App component loaded");
 console.log("[APP] readFileNote function:", typeof readFileNote);
@@ -40,6 +40,8 @@ function App() {
   const [searchResults, setSearchResults] = useState<SearchResultItem[]>([]);
   const [selectedSearchIndex, setSelectedSearchIndex] = useState(0);
   const [isSearchLoading, setIsSearchLoading] = useState(false);
+  const [appVersion, setAppVersion] = useState("");
+  const [treeRevealPath, setTreeRevealPath] = useState<string | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") {
       return false;
@@ -50,6 +52,27 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem("sidebar_collapsed", String(isSidebarCollapsed));
   }, [isSidebarCollapsed]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadVersion = async () => {
+      try {
+        const version = await getVersion();
+        if (!cancelled) {
+          setAppVersion(version);
+        }
+      } catch (error) {
+        console.error("[APP] Failed to load runtime version:", error);
+      }
+    };
+
+    void loadVersion();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const getDbFolderName = (fileTreePath: string): string => {
     if (fileTreePath.startsWith("Notes/")) {
@@ -362,14 +385,17 @@ function App() {
 
     if (selectedItem.type === "folder") {
       expandFolderPath(selectedItem.path);
+      setSelectedFile(null);
       setActiveNav("folder");
       setActiveFolder(selectedItem.path);
+      setTreeRevealPath(selectedItem.path);
     } else {
       const folderPath = selectedItem.path.includes("/") ? selectedItem.path.slice(0, selectedItem.path.lastIndexOf("/")) : "";
       if (folderPath) {
         expandFolderPath(folderPath);
       }
       await handleOpenFile(selectedItem.path);
+      setTreeRevealPath(selectedItem.path);
     }
 
     handleCloseSearch();
@@ -772,7 +798,7 @@ function App() {
         onNewFolderConfirm={handleFolderCreated}
         onNewFolderCancel={() => setShowNewFolderModal(false)}
         currentFolderPath={activeFolder || '根目录'}
-        version={packageJson.version}
+        version={appVersion}
         collapsed={isSidebarCollapsed}
         onToggleCollapsed={() => setIsSidebarCollapsed((prev) => !prev)}
         onOpenSearch={handleOpenSearch}
@@ -797,6 +823,8 @@ function App() {
         onDeleteNote={handleDeleteNoteFromTree}
         onNewNote={handleNoteCreated}
         onNewFolder={handleNewFolderClick}
+        revealPath={treeRevealPath}
+        onRevealHandled={() => setTreeRevealPath(null)}
       />
       <Editor 
         file={selectedFile}

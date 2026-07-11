@@ -1,6 +1,6 @@
 {
   "productName": "Mini Notes",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "identifier": "com.mininotes.app",
   "build": {
     "beforeBuildCommand": "npm run build",
