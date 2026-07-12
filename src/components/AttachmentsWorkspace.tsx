@@ -70,11 +70,18 @@ function AttachmentTreeNodeView({
   onToggle,
   onSelectFolder,
   onOpenFolder,
+  onDeleteItem,
   onDropItems,
   onSetDropTarget,
   onDragFolderStart,
   onDragEnd,
   onTreeItemClick,
+  renamingPath,
+  renameDraft,
+  onRenameDraftChange,
+  onStartRename,
+  onCommitRename,
+  onCancelRename,
   depth = 0,
 }: {
   node: AttachmentFolderNode;
@@ -85,11 +92,18 @@ function AttachmentTreeNodeView({
   onToggle: (path: string) => void;
   onSelectFolder: (path: string) => void;
   onOpenFolder: (path: string) => void;
+  onDeleteItem: (node: AttachmentFolderNode) => void;
   onDropItems: (event: DragEvent<HTMLElement>, targetFolder: string) => Promise<void>;
   onSetDropTarget: (path: string | null) => void;
   onDragFolderStart: (path: string) => string[];
   onDragEnd: () => void;
   onTreeItemClick: (path: string, modifiers: TreeClickModifiers) => void;
+  renamingPath: string | null;
+  renameDraft: string;
+  onRenameDraftChange: (value: string) => void;
+  onStartRename: (node: AttachmentFolderNode) => void;
+  onCommitRename: (node: AttachmentFolderNode) => void;
+  onCancelRename: () => void;
   depth?: number;
 }) {
   const hasChildren = node.children.length > 0;
@@ -97,6 +111,7 @@ function AttachmentTreeNodeView({
   const isSelected = selectedFolder === node.relative_path;
   const isTreeSelected = selectedTreePaths.has(node.relative_path);
   const isDropTarget = dropTarget === node.relative_path;
+  const isRenaming = renamingPath === node.relative_path;
 
   return (
     <div>
@@ -145,10 +160,57 @@ function AttachmentTreeNodeView({
           {hasChildren ? (isExpanded ? "▼" : "▶") : ""}
         </button>
         <span>📁</span>
-        <span className="truncate">{node.name}</span>
+        {isRenaming ? (
+          <input
+            type="text"
+            value={renameDraft}
+            onChange={(event) => onRenameDraftChange(event.target.value)}
+            onClick={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onBlur={() => onCommitRename(node)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                onCommitRename(node);
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                onCancelRename();
+              }
+            }}
+            className="min-w-0 flex-1 rounded border border-blue-200 bg-white px-2 py-1 text-sm text-slate-700 outline-none"
+            autoFocus
+          />
+        ) : (
+          <span className="truncate">{node.name}</span>
+        )}
         <button
           type="button"
-          className="ml-auto p-1 text-slate-400 opacity-45 transition-opacity hover:text-blue-500 hover:opacity-100"
+          className="p-1 text-slate-400 opacity-60 transition-all hover:bg-slate-100 hover:text-blue-500 hover:opacity-100"
+          onClick={(event) => {
+            event.stopPropagation();
+            onStartRename(node);
+          }}
+          title="重命名"
+          aria-label="重命名"
+        >
+          <span aria-hidden="true">✎</span>
+        </button>
+        <button
+          type="button"
+          className="p-1 text-slate-400 opacity-60 transition-all hover:bg-slate-100 hover:text-red-500 hover:opacity-100"
+          onClick={(event) => {
+            event.stopPropagation();
+            onDeleteItem(node);
+          }}
+          title="删除"
+          aria-label="删除"
+        >
+          <span aria-hidden="true">🗑</span>
+        </button>
+        <button
+          type="button"
+          className="ml-auto p-1 text-slate-400 opacity-60 transition-all hover:bg-slate-100 hover:text-blue-500 hover:opacity-100"
           onClick={(event) => {
             event.stopPropagation();
             onOpenFolder(node.relative_path);
@@ -172,11 +234,18 @@ function AttachmentTreeNodeView({
               onToggle={onToggle}
               onSelectFolder={onSelectFolder}
               onOpenFolder={onOpenFolder}
+              onDeleteItem={onDeleteItem}
               onDropItems={onDropItems}
               onSetDropTarget={onSetDropTarget}
               onDragFolderStart={onDragFolderStart}
               onDragEnd={onDragEnd}
               onTreeItemClick={onTreeItemClick}
+              renamingPath={renamingPath}
+              renameDraft={renameDraft}
+              onRenameDraftChange={onRenameDraftChange}
+              onStartRename={onStartRename}
+              onCommitRename={onCommitRename}
+              onCancelRename={onCancelRename}
               depth={depth + 1}
             />
           ))}
@@ -213,6 +282,7 @@ function AttachmentsWorkspace({
   const [treeSelectionAnchorPath, setTreeSelectionAnchorPath] = useState<string | null>("");
   const [draggedPaths, setDraggedPaths] = useState<string[]>([]);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [renamingTreePath, setRenamingTreePath] = useState<string | null>(null);
 
   const selectedFolderLabel = selectedFolder || "附件根目录";
 
@@ -461,6 +531,31 @@ function AttachmentsWorkspace({
     setSelectionAnchorPath(null);
   }, [onMoveItems]);
 
+  const commitTreeRename = useCallback(async (node: AttachmentFolderNode) => {
+    const name = renameDraft.trim();
+    if (!name) {
+      setRenameDraft(node.name);
+      setRenamingTreePath(null);
+      return;
+    }
+
+    if (name === node.name) {
+      setRenamingTreePath(null);
+      return;
+    }
+
+    await onRenameItem({
+      name: node.name,
+      relative_path: node.relative_path,
+      absolute_path: "",
+      item_type: "folder",
+      extension: null,
+      size: null,
+      modified_at: node.modified_at ?? null,
+    }, name);
+    setRenamingTreePath(null);
+  }, [onRenameItem, renameDraft]);
+
   return (
     <>
       <div className="w-[260px] bg-white border-r border-slate-200 flex flex-col">
@@ -527,6 +622,17 @@ function AttachmentsWorkspace({
               }
               onSelectFolder={onSelectFolder}
               onOpenFolder={onOpenFolder}
+              onDeleteItem={(node) => {
+                void onDeleteItem({
+                  name: node.name,
+                  relative_path: node.relative_path,
+                  absolute_path: "",
+                  item_type: "folder",
+                  extension: null,
+                  size: null,
+                  modified_at: node.modified_at ?? null,
+                });
+              }}
               onDropItems={handleDropItems}
               onSetDropTarget={setDropTarget}
               onDragFolderStart={handleTreeFolderDragStart}
@@ -535,6 +641,19 @@ function AttachmentsWorkspace({
                 setDropTarget(null);
               }}
               onTreeItemClick={handleTreeItemClick}
+              renamingPath={renamingTreePath}
+              renameDraft={renameDraft}
+              onRenameDraftChange={setRenameDraft}
+              onStartRename={(node) => {
+                setRenamingTreePath(node.relative_path);
+                setRenameDraft(node.name);
+              }}
+              onCommitRename={(node) => {
+                void commitTreeRename(node);
+              }}
+              onCancelRename={() => {
+                setRenamingTreePath(null);
+              }}
             />
           ))}
         </div>

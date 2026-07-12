@@ -14,6 +14,11 @@ interface EditorProps {
 
 type SaveStatus = "saved" | "editing" | "saving" | "failed";
 
+interface SearchMatchRange {
+  start: number;
+  end: number;
+}
+
 function Editor({ file, onSaveFile, onDeleteFile, onRenameFile }: EditorProps) {
   const [draftContent, setDraftContent] = useState("");
   const [lastSavedContent, setLastSavedContent] = useState("");
@@ -25,7 +30,49 @@ function Editor({ file, onSaveFile, onDeleteFile, onRenameFile }: EditorProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
   const [lastSavedTitle, setLastSavedTitle] = useState("");
+  const [isFindBarOpen, setIsFindBarOpen] = useState(false);
+  const [showReplace, setShowReplace] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [replaceQuery, setReplaceQuery] = useState("");
+  const [matchCase, setMatchCase] = useState(false);
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
+  const [replaceMessage, setReplaceMessage] = useState("");
   const fileRef = useRef<FileNotePayload | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const findInputRef = useRef<HTMLInputElement | null>(null);
+
+  const normalizeText = useCallback((value: string) => (
+    matchCase ? value : value.toLocaleLowerCase()
+  ), [matchCase]);
+
+  const findMatches = useCallback((content: string, query: string): SearchMatchRange[] => {
+    if (!query) {
+      return [];
+    }
+
+    const normalizedContent = normalizeText(content);
+    const normalizedQuery = normalizeText(query);
+    const matches: SearchMatchRange[] = [];
+    let searchStart = 0;
+
+    while (searchStart <= normalizedContent.length) {
+      const matchIndex = normalizedContent.indexOf(normalizedQuery, searchStart);
+      if (matchIndex === -1) {
+        break;
+      }
+
+      matches.push({
+        start: matchIndex,
+        end: matchIndex + query.length,
+      });
+      searchStart = matchIndex + Math.max(query.length, 1);
+    }
+
+    return matches;
+  }, [normalizeText]);
+
+  const matches = findMatches(draftContent, findQuery);
+  const activeMatch = matches[currentMatchIndex] ?? null;
 
   useEffect(() => {
     console.log("[EDITOR] file prop changed", file?.relative_path);
@@ -42,7 +89,181 @@ function Editor({ file, onSaveFile, onDeleteFile, onRenameFile }: EditorProps) {
       setDraftTitle("");
       setLastSavedTitle("");
     }
+    setIsFindBarOpen(false);
+    setShowReplace(false);
+    setFindQuery("");
+    setReplaceQuery("");
+    setCurrentMatchIndex(0);
+    setReplaceMessage("");
   }, [file]);
+
+  useEffect(() => {
+    if (!isFindBarOpen) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      findInputRef.current?.focus();
+      findInputRef.current?.select();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [isFindBarOpen, showReplace]);
+
+  useEffect(() => {
+    if (matches.length === 0) {
+      setCurrentMatchIndex(0);
+      return;
+    }
+
+    setCurrentMatchIndex((prev) => Math.min(prev, matches.length - 1));
+  }, [matches.length]);
+
+  const focusEditorSelection = useCallback((match: SearchMatchRange | null, shouldFocus = true) => {
+    if (!match || !textareaRef.current) {
+      return;
+    }
+
+    if (shouldFocus) {
+      textareaRef.current.focus();
+    }
+    textareaRef.current.setSelectionRange(match.start, match.end);
+  }, []);
+
+  const openFindBar = useCallback((replaceMode: boolean) => {
+    if (!file || !isEditing) {
+      return;
+    }
+
+    const selection = textareaRef.current
+      ? draftContent.slice(textareaRef.current.selectionStart, textareaRef.current.selectionEnd).trim()
+      : "";
+
+    setIsFindBarOpen(true);
+    setShowReplace(replaceMode);
+    setFindQuery(selection || findQuery);
+    setReplaceMessage("");
+    if (!replaceMode) {
+      setReplaceQuery("");
+    }
+  }, [draftContent, file, findQuery, isEditing]);
+
+  const closeFindBar = useCallback(() => {
+    setIsFindBarOpen(false);
+    setShowReplace(false);
+    setCurrentMatchIndex(0);
+    setReplaceMessage("");
+    textareaRef.current?.focus();
+  }, []);
+
+  const goToMatch = useCallback((direction: 1 | -1) => {
+    if (matches.length === 0) {
+      return;
+    }
+
+    setCurrentMatchIndex((prev) => {
+      const nextIndex = (prev + direction + matches.length) % matches.length;
+      window.setTimeout(() => {
+        const nextMatch = matches[nextIndex] ?? null;
+        focusEditorSelection(nextMatch);
+      }, 0);
+      return nextIndex;
+    });
+    setReplaceMessage("");
+  }, [focusEditorSelection, matches]);
+
+  const replaceCurrentMatch = useCallback(() => {
+    if (!activeMatch) {
+      return;
+    }
+
+    const nextContent = `${draftContent.slice(0, activeMatch.start)}${replaceQuery}${draftContent.slice(activeMatch.end)}`;
+    setDraftContent(nextContent);
+    setReplaceMessage("已替换当前匹配");
+    if (contentSaveStatus !== "editing") {
+      setContentSaveStatus("editing");
+    }
+    window.setTimeout(() => {
+      const nextMatches = findMatches(nextContent, findQuery);
+      const nextMatch = nextMatches[Math.min(currentMatchIndex, Math.max(nextMatches.length - 1, 0))] ?? null;
+      focusEditorSelection(nextMatch);
+    }, 0);
+  }, [activeMatch, contentSaveStatus, currentMatchIndex, draftContent, findMatches, findQuery, focusEditorSelection, replaceQuery]);
+
+  const replaceAllMatches = useCallback(() => {
+    if (!findQuery) {
+      return;
+    }
+
+    const ranges = findMatches(draftContent, findQuery);
+    if (ranges.length === 0) {
+      setReplaceMessage("没有可替换的匹配项");
+      return;
+    }
+
+    let cursor = 0;
+    let rebuilt = "";
+    for (const range of ranges) {
+      rebuilt += draftContent.slice(cursor, range.start);
+      rebuilt += replaceQuery;
+      cursor = range.end;
+    }
+    rebuilt += draftContent.slice(cursor);
+
+    setDraftContent(rebuilt);
+    setCurrentMatchIndex(0);
+    setReplaceMessage(`已全部替换 ${ranges.length} 处`);
+    if (contentSaveStatus !== "editing") {
+      setContentSaveStatus("editing");
+    }
+    window.setTimeout(() => {
+      const nextMatch = findMatches(rebuilt, findQuery)[0] ?? null;
+      focusEditorSelection(nextMatch, false);
+    }, 0);
+  }, [contentSaveStatus, draftContent, findMatches, findQuery, focusEditorSelection, replaceQuery]);
+
+  const handleFindBarKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeFindBar();
+      return;
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      goToMatch(event.shiftKey ? -1 : 1);
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const primaryPressed = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? event.metaKey : event.ctrlKey;
+      if (!primaryPressed || event.altKey) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === "f") {
+        event.preventDefault();
+        openFindBar(false);
+        return;
+      }
+
+      if (key === "h" && event.shiftKey && isFindBarOpen && showReplace) {
+        event.preventDefault();
+        replaceAllMatches();
+        return;
+      }
+
+      if (key === "h") {
+        event.preventDefault();
+        openFindBar(true);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isFindBarOpen, openFindBar, replaceAllMatches, showReplace]);
 
   const handleTitleBlur = async () => {
     if (!file) {
@@ -247,6 +468,96 @@ function Editor({ file, onSaveFile, onDeleteFile, onRenameFile }: EditorProps) {
         </div>
       </div>
 
+      {isFindBarOpen && isEditing && (
+        <div className="px-4 py-3 border-b border-slate-200 bg-slate-50">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={findInputRef}
+              type="text"
+              value={findQuery}
+              onChange={(e) => {
+                setFindQuery(e.target.value);
+                setCurrentMatchIndex(0);
+                setReplaceMessage("");
+              }}
+              onKeyDown={handleFindBarKeyDown}
+              className="w-44 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-400"
+              placeholder="查找"
+            />
+            {showReplace && (
+              <input
+                type="text"
+                value={replaceQuery}
+                onChange={(e) => {
+                  setReplaceQuery(e.target.value);
+                  setReplaceMessage("");
+                }}
+                onKeyDown={handleFindBarKeyDown}
+                className="w-44 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-400"
+                placeholder="替换为"
+              />
+            )}
+            <span className="min-w-20 text-xs text-slate-500">
+              {matches.length === 0 && findQuery ? "0 个结果" : matches.length > 0 ? `${currentMatchIndex + 1}/${matches.length}` : "输入关键词"}
+            </span>
+            <button
+              onClick={() => goToMatch(-1)}
+              disabled={matches.length === 0}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 transition-colors hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-40"
+              title="上一个匹配"
+            >
+              上一个
+            </button>
+            <button
+              onClick={() => goToMatch(1)}
+              disabled={matches.length === 0}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 transition-colors hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-40"
+              title="下一个匹配"
+            >
+              下一个
+            </button>
+            {showReplace && (
+              <>
+                <button
+                  onClick={replaceCurrentMatch}
+                  disabled={!activeMatch}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 transition-colors hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  替换当前
+                </button>
+                <button
+                  onClick={replaceAllMatches}
+                  disabled={matches.length === 0}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 transition-colors hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  全部替换
+                </button>
+              </>
+            )}
+            <button
+              onClick={() => setMatchCase((prev) => !prev)}
+              className={clsx(
+                "rounded-lg border px-3 py-2 text-sm transition-colors",
+                matchCase
+                  ? "border-blue-200 bg-blue-50 text-blue-600"
+                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+              )}
+            >
+              区分大小写
+            </button>
+            <button
+              onClick={closeFindBar}
+              className="rounded-lg border border-transparent px-3 py-2 text-sm text-slate-500 transition-colors hover:bg-slate-200"
+            >
+              关闭
+            </button>
+          </div>
+          <div className="mt-2 text-xs text-slate-400">
+            {replaceMessage || "Enter 下一个，Shift+Enter 上一个，Esc 关闭，Cmd/Ctrl+H 打开替换，Cmd/Ctrl+Shift+H 全部替换"}
+          </div>
+        </div>
+      )}
+
       {showProperties && (
         <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
           <div className="grid grid-cols-4 gap-4 text-xs">
@@ -273,6 +584,7 @@ function Editor({ file, onSaveFile, onDeleteFile, onRenameFile }: EditorProps) {
       <div className="flex-1 overflow-hidden">
         {isEditing ? (
           <textarea
+            ref={textareaRef}
             value={draftContent}
             onChange={(e) => handleContentChange(e.target.value)}
             className="w-full h-full p-4 resize-none bg-white text-slate-800 font-mono text-sm leading-relaxed focus:outline-none"

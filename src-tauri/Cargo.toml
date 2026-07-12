@@ -1,6 +1,6 @@
 [package]
 name = "mini-notes"
-version = "0.1.6"
+version = "0.1.7"
 description = "A personal note-taking application"
 authors = ["Orange Pix Web"]
 license = "MIT"
