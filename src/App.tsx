@@ -498,11 +498,12 @@ function App() {
     setActiveFolder(folder);
   }, []);
 
-  const handleTaskCreated = useCallback(async () => {
+  const handleTaskCreated = useCallback(async (parentId: string | null = null) => {
     const response = await createTask({
       title: "新待办",
       content: "",
       priority: "normal",
+      parent_id: parentId,
       remind_at: null,
       due_at: null,
     });
@@ -552,6 +553,7 @@ function App() {
         content: task.content,
         completed,
         priority: task.priority,
+        parent_id: task.parent_id ?? null,
         remind_at: task.remind_at ?? null,
         due_at: task.due_at ?? null,
       });
@@ -1102,14 +1104,25 @@ function App() {
     return navLabels[activeNav] || "全部笔记";
   }, [activeNav, activeFolder]);
 
+  const sidebarPrimaryActionLabel = activeNav === "tasks" ? "新建待办" : "新建笔记";
+  const sidebarSecondaryActionLabel = activeNav === "tasks" ? "新建子待办" : "新建文件夹";
+  const sidebarPrimaryActionIcon = activeNav === "tasks" ? "✅" : "📝";
+  const sidebarSecondaryActionIcon = activeNav === "tasks" ? "↳" : "📁";
+  const sidebarPrimaryAction = activeNav === "tasks"
+    ? () => void handleTaskCreated(null)
+    : handleNoteCreated;
+  const sidebarSecondaryAction = activeNav === "tasks"
+    ? (selectedTaskId ? () => void handleTaskCreated(selectedTaskId) : undefined)
+    : handleNewFolderClick;
+
   return (
     <div className="flex h-full bg-slate-50">
       <Sidebar 
         activeNav={activeNav} 
         activeFolder={activeFolder}
         onNavChange={handleNavChange}
-        onNewNote={handleNoteCreated}
-        onNewFolder={handleNewFolderClick}
+        onNewNote={sidebarPrimaryAction}
+        onNewFolder={sidebarSecondaryAction}
         currentDir={notesRootDir}
         onDirChange={handleDirChange}
         attachmentsDir={attachmentsRootDir}
@@ -1125,13 +1138,18 @@ function App() {
         collapsed={isSidebarCollapsed}
         onToggleCollapsed={() => setIsSidebarCollapsed((prev) => !prev)}
         onOpenSearch={handleOpenSearch}
+        primaryActionLabel={sidebarPrimaryActionLabel}
+        secondaryActionLabel={sidebarSecondaryActionLabel}
+        primaryActionIcon={sidebarPrimaryActionIcon}
+        secondaryActionIcon={sidebarSecondaryActionIcon}
       />
       {activeNav === "tasks" ? (
         <TaskWorkspace
           tasks={tasks}
           selectedTaskId={selectedTaskId}
           onSelectTask={setSelectedTaskId}
-          onCreateTask={handleTaskCreated}
+          onCreateTask={() => void handleTaskCreated(null)}
+          onCreateChildTask={(parentId) => void handleTaskCreated(parentId)}
           onSaveTask={handleTaskSaved}
           onDeleteTask={handleTaskDeleted}
           onToggleTaskCompleted={handleTaskCompletedToggle}

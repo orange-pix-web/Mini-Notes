@@ -32,6 +32,9 @@ pub struct Todo {
     pub content: String,
     pub completed: bool,
     pub priority: String,
+    pub parent_id: Option<String>,
+    pub depth: i64,
+    pub sort_order: i64,
     pub remind_at: Option<String>,
     pub due_at: Option<String>,
     pub created_at: String,
@@ -49,6 +52,7 @@ pub fn run_migrations(conn: &Connection) -> SqlResult<()> {
         include_str!("../migrations/0002_add_tasks.sql"),
         include_str!("../migrations/0003_add_note_links.sql"),
         include_str!("../migrations/0004_add_todos.sql"),
+        include_str!("../migrations/0005_add_todo_hierarchy.sql"),
     ];
 
     for (idx, migration) in migrations.iter().enumerate() {
@@ -726,12 +730,102 @@ fn map_todo_row(row: &rusqlite::Row<'_>) -> SqlResult<Todo> {
         content: row.get(2)?,
         completed: row.get(3)?,
         priority: row.get(4)?,
-        remind_at: row.get(5)?,
-        due_at: row.get(6)?,
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
-        deleted_at: row.get(9)?,
+        parent_id: row.get(5)?,
+        depth: row.get(6)?,
+        sort_order: row.get(7)?,
+        remind_at: row.get(8)?,
+        due_at: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+        deleted_at: row.get(12)?,
     })
+}
+
+const MAX_TODO_DEPTH: i64 = 2;
+
+fn todo_select_fields() -> &'static str {
+    "id, title, content, completed, priority, parent_id, depth, sort_order, remind_at, due_at, created_at, updated_at, deleted_at"
+}
+
+fn get_todo_depth(conn: &Connection, id: &str) -> SqlResult<Option<i64>> {
+    let mut stmt = conn.prepare("SELECT depth FROM todos WHERE id = ? AND deleted_at IS NULL")?;
+    let mut rows = stmt.query(params![id])?;
+    if let Some(row) = rows.next()? {
+        Ok(Some(row.get(0)?))
+    } else {
+        Ok(None)
+    }
+}
+
+fn get_next_todo_sort_order(conn: &Connection, parent_id: Option<&str>) -> SqlResult<i64> {
+    match parent_id {
+        Some(parent_id) => conn.query_row(
+            "SELECT COALESCE(MIN(sort_order), 0) - 1 FROM todos WHERE parent_id = ? AND deleted_at IS NULL",
+            params![parent_id],
+            |row| row.get(0),
+        ),
+        None => conn.query_row(
+            "SELECT COALESCE(MIN(sort_order), 0) - 1 FROM todos WHERE parent_id IS NULL AND deleted_at IS NULL",
+            [],
+            |row| row.get(0),
+        ),
+    }
+}
+
+fn mark_descendants_completed(
+    conn: &Connection,
+    id: &str,
+    completed: bool,
+    updated_at: &str,
+) -> SqlResult<()> {
+    conn.execute(
+        "WITH RECURSIVE subtree(id) AS (
+            SELECT id FROM todos WHERE id = ?
+            UNION ALL
+            SELECT t.id FROM todos t
+            INNER JOIN subtree s ON t.parent_id = s.id
+        )
+        UPDATE todos
+        SET completed = ?, updated_at = ?
+        WHERE id IN (SELECT id FROM subtree)",
+        params![id, completed, updated_at],
+    )?;
+    Ok(())
+}
+
+fn sync_ancestor_completion(
+    conn: &Connection,
+    start_parent_id: Option<String>,
+    updated_at: &str,
+) -> SqlResult<()> {
+    let mut current_parent_id = start_parent_id;
+
+    while let Some(parent_id) = current_parent_id {
+        let should_complete: bool = conn.query_row(
+            "SELECT CASE
+                WHEN EXISTS(SELECT 1 FROM todos WHERE parent_id = ? AND deleted_at IS NULL)
+                AND NOT EXISTS(SELECT 1 FROM todos WHERE parent_id = ? AND deleted_at IS NULL AND completed = 0)
+                THEN 1 ELSE 0 END",
+            params![parent_id, parent_id],
+            |row| row.get(0),
+        )?;
+
+        conn.execute(
+            "UPDATE todos SET completed = ?, updated_at = ? WHERE id = ?",
+            params![should_complete, updated_at, parent_id],
+        )?;
+
+        current_parent_id = conn
+            .query_row(
+                "SELECT parent_id FROM todos WHERE id = ?",
+                params![parent_id],
+                |row| row.get(0),
+            )
+            .ok()
+            .flatten();
+    }
+
+    Ok(())
 }
 
 pub fn create_todo(db_path: &Path, request: &CreateTaskRequest) -> SqlResult<Todo> {
@@ -748,17 +842,41 @@ pub fn create_todo(db_path: &Path, request: &CreateTaskRequest) -> SqlResult<Tod
     } else {
         request.priority.trim().to_string()
     };
+    let parent_id = request
+        .parent_id
+        .clone()
+        .filter(|value| !value.trim().is_empty());
+    let depth = if let Some(ref parent) = parent_id {
+        let parent_depth = get_todo_depth(&conn, parent)?.ok_or_else(|| {
+            rusqlite::Error::InvalidParameterName("父待办不存在或已删除".to_string())
+        })?;
+        if parent_depth >= MAX_TODO_DEPTH {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "待办嵌套深度已达上限".to_string(),
+            ));
+        }
+        parent_depth + 1
+    } else {
+        0
+    };
+    let sort_order = get_next_todo_sort_order(&conn, parent_id.as_deref())?;
 
     conn.query_row(
-        "INSERT INTO todos (id, title, content, completed, priority, remind_at, due_at, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-         RETURNING id, title, content, completed, priority, remind_at, due_at, created_at, updated_at, deleted_at",
+        &format!(
+            "INSERT INTO todos (id, title, content, completed, priority, parent_id, depth, sort_order, remind_at, due_at, created_at, updated_at, deleted_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+             RETURNING {}",
+            todo_select_fields()
+        ),
         params![
             id,
             title,
             request.content,
             false,
             priority,
+            parent_id,
+            depth,
+            sort_order,
             request.remind_at,
             request.due_at,
             now,
@@ -766,25 +884,38 @@ pub fn create_todo(db_path: &Path, request: &CreateTaskRequest) -> SqlResult<Tod
         ],
         map_todo_row,
     )
+    .and_then(|todo| {
+        if parent_id.is_some() {
+            sync_ancestor_completion(&conn, parent_id.clone(), &now)?;
+        }
+        Ok(todo)
+    })
 }
 
 pub fn list_todos(db_path: &Path, include_deleted: bool) -> SqlResult<Vec<Todo>> {
     let conn = Connection::open(db_path)?;
     let query = if include_deleted {
-        "SELECT id, title, content, completed, priority, remind_at, due_at, created_at, updated_at, deleted_at
-         FROM todos WHERE deleted_at IS NOT NULL
-         ORDER BY deleted_at DESC, updated_at DESC"
+        format!(
+            "SELECT {} FROM todos WHERE deleted_at IS NOT NULL
+             ORDER BY deleted_at DESC, depth ASC, sort_order ASC, updated_at DESC",
+            todo_select_fields()
+        )
     } else {
-        "SELECT id, title, content, completed, priority, remind_at, due_at, created_at, updated_at, deleted_at
-         FROM todos WHERE deleted_at IS NULL
-         ORDER BY completed ASC,
-                  CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END ASC,
-                  CASE WHEN due_at IS NULL OR due_at = '' THEN 1 ELSE 0 END ASC,
-                  due_at ASC,
-                  updated_at DESC"
+        format!(
+            "SELECT {} FROM todos WHERE deleted_at IS NULL
+             ORDER BY depth ASC,
+                      COALESCE(parent_id, id) ASC,
+                      sort_order ASC,
+                      completed ASC,
+                      CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END ASC,
+                      CASE WHEN due_at IS NULL OR due_at = '' THEN 1 ELSE 0 END ASC,
+                      due_at ASC,
+                      updated_at DESC",
+            todo_select_fields()
+        )
     };
 
-    let mut stmt = conn.prepare(query)?;
+    let mut stmt = conn.prepare(&query)?;
     let rows = stmt.query_map([], map_todo_row)?;
     rows.collect()
 }
@@ -803,11 +934,16 @@ pub fn update_todo(db_path: &Path, request: &UpdateTaskRequest) -> SqlResult<Tod
         request.priority.trim().to_string()
     };
 
-    conn.query_row(
+    let previous_parent_id: Option<String> = conn.query_row(
+        "SELECT parent_id FROM todos WHERE id = ? AND deleted_at IS NULL",
+        params![request.id],
+        |row| row.get(0),
+    )?;
+
+    conn.execute(
         "UPDATE todos
          SET title = ?, content = ?, completed = ?, priority = ?, remind_at = ?, due_at = ?, updated_at = ?
-         WHERE id = ? AND deleted_at IS NULL
-         RETURNING id, title, content, completed, priority, remind_at, due_at, created_at, updated_at, deleted_at",
+         WHERE id = ? AND deleted_at IS NULL",
         params![
             title,
             request.content,
@@ -818,31 +954,75 @@ pub fn update_todo(db_path: &Path, request: &UpdateTaskRequest) -> SqlResult<Tod
             now,
             request.id
         ],
+    )?;
+
+    if request.completed {
+        mark_descendants_completed(&conn, &request.id, true, &now)?;
+    }
+
+    sync_ancestor_completion(&conn, previous_parent_id, &now)?;
+
+    conn.query_row(
+        &format!("SELECT {} FROM todos WHERE id = ?", todo_select_fields()),
+        params![request.id],
         map_todo_row,
     )
 }
 
 pub fn delete_todo(db_path: &Path, id: &str) -> SqlResult<()> {
     let conn = Connection::open(db_path)?;
+    let now = now_str();
     conn.execute(
-        "UPDATE todos SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
-        params![now_str(), now_str(), id],
+        "WITH RECURSIVE subtree(id) AS (
+            SELECT id FROM todos WHERE id = ?
+            UNION ALL
+            SELECT t.id FROM todos t
+            INNER JOIN subtree s ON t.parent_id = s.id
+        )
+        UPDATE todos
+        SET deleted_at = ?, updated_at = ?
+        WHERE id IN (SELECT id FROM subtree) AND deleted_at IS NULL",
+        params![id, now, now],
     )?;
     Ok(())
 }
 
 pub fn restore_todo(db_path: &Path, id: &str) -> SqlResult<()> {
     let conn = Connection::open(db_path)?;
+    let now = now_str();
     conn.execute(
-        "UPDATE todos SET deleted_at = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL",
-        params![now_str(), id],
+        "WITH RECURSIVE relatives(id) AS (
+            SELECT id FROM todos WHERE id = ?
+            UNION
+            SELECT parent_id FROM todos WHERE id = ? AND parent_id IS NOT NULL
+            UNION ALL
+            SELECT t.parent_id FROM todos t
+            INNER JOIN relatives r ON t.id = r.id
+            WHERE t.parent_id IS NOT NULL
+            UNION ALL
+            SELECT t.id FROM todos t
+            INNER JOIN relatives r ON t.parent_id = r.id
+        )
+        UPDATE todos
+        SET deleted_at = NULL, updated_at = ?
+        WHERE id IN (SELECT id FROM relatives WHERE id IS NOT NULL) AND deleted_at IS NOT NULL",
+        params![id, id, now],
     )?;
     Ok(())
 }
 
 pub fn permanently_delete_todo(db_path: &Path, id: &str) -> SqlResult<()> {
     let conn = Connection::open(db_path)?;
-    conn.execute("DELETE FROM todos WHERE id = ?", params![id])?;
+    conn.execute(
+        "WITH RECURSIVE subtree(id) AS (
+            SELECT id FROM todos WHERE id = ?
+            UNION ALL
+            SELECT t.id FROM todos t
+            INNER JOIN subtree s ON t.parent_id = s.id
+        )
+        DELETE FROM todos WHERE id IN (SELECT id FROM subtree)",
+        params![id],
+    )?;
     Ok(())
 }
 

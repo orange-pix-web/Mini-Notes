@@ -31,6 +31,10 @@ interface SidebarProps {
   onOpenSearch?: () => void;
   attachmentsDir?: string;
   onAttachmentsDirChange?: () => void;
+  primaryActionLabel?: string;
+  secondaryActionLabel?: string;
+  primaryActionIcon?: string;
+  secondaryActionIcon?: string;
 }
 
 function Sidebar({ 
@@ -54,6 +58,10 @@ function Sidebar({
   onOpenSearch,
   attachmentsDir,
   onAttachmentsDirChange,
+  primaryActionLabel,
+  secondaryActionLabel,
+  primaryActionIcon,
+  secondaryActionIcon,
 }: SidebarProps) {
   const handleNewNoteClick = () => {
     console.log("[UI] new note button clicked");
@@ -78,6 +86,10 @@ function Sidebar({
   const footerDir = isAttachmentsPage ? attachmentsDir : currentDir;
   const footerAction = isAttachmentsPage ? onAttachmentsDirChange : onDirChange;
   const footerActionLabel = isAttachmentsPage ? "[更换附件目录]" : "[更换文件夹]";
+  const resolvedPrimaryLabel = primaryActionLabel || "新建笔记";
+  const resolvedSecondaryLabel = secondaryActionLabel || "新建文件夹";
+  const resolvedPrimaryIcon = primaryActionIcon || "📝";
+  const resolvedSecondaryIcon = secondaryActionIcon || "📁";
 
   return (
     <div className={`${collapsed ? "w-[68px]" : "w-[200px]"} bg-white border-r border-slate-200 flex flex-col transition-[width] duration-200`}>
@@ -123,7 +135,7 @@ function Sidebar({
       <div className={`${collapsed ? "p-2" : "p-2"} flex flex-col gap-2`}>
         <button
           onClick={handleNewNoteClick}
-          title="新建笔记"
+          title={resolvedPrimaryLabel}
           disabled={!onNewNote || isCreating}
           className={`relative flex items-center ${collapsed ? "justify-center px-0 py-2.5" : "justify-center gap-2 px-3 py-2"} text-sm font-medium rounded-lg transition-colors ${
             isCreating
@@ -132,15 +144,15 @@ function Sidebar({
           }`}
         >
           <span className={`relative inline-flex items-center justify-center ${collapsed ? "text-lg" : ""}`}>
-            <span aria-hidden="true">📝</span>
+            <span aria-hidden="true">{resolvedPrimaryIcon}</span>
             <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-white text-[10px] font-bold text-blue-600">+</span>
           </span>
-          {!collapsed && <span>{isCreating ? "创建中..." : "新建笔记"}</span>}
+          {!collapsed && <span>{isCreating ? "创建中..." : resolvedPrimaryLabel}</span>}
         </button>
 
         <button
           onClick={handleNewFolderClick}
-          title="新建文件夹"
+          title={resolvedSecondaryLabel}
           disabled={!onNewFolder || isCreating}
           className={`relative flex items-center ${collapsed ? "justify-center px-0 py-2.5" : "justify-center gap-2 px-3 py-2"} text-sm font-medium rounded-lg transition-colors ${
             isCreating
@@ -149,10 +161,10 @@ function Sidebar({
           }`}
         >
           <span className={`relative inline-flex items-center justify-center ${collapsed ? "text-lg" : ""}`}>
-            <span aria-hidden="true">📁</span>
+            <span aria-hidden="true">{resolvedSecondaryIcon}</span>
             <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-white text-[10px] font-bold text-green-600">+</span>
           </span>
-          {!collapsed && <span>{isCreating ? "创建中..." : "新建文件夹"}</span>}
+          {!collapsed && <span>{isCreating ? "创建中..." : resolvedSecondaryLabel}</span>}
         </button>
 
         {collapsed && (

@@ -60,6 +60,7 @@ pub struct CreateTaskRequest {
     pub priority: String,
     pub remind_at: Option<String>,
     pub due_at: Option<String>,
+    pub parent_id: Option<String>,
 }
 
 impl Default for CreateTaskRequest {
@@ -70,6 +71,7 @@ impl Default for CreateTaskRequest {
             priority: "normal".to_string(),
             remind_at: None,
             due_at: None,
+            parent_id: None,
         }
     }
 }
@@ -84,6 +86,7 @@ pub struct UpdateTaskRequest {
     pub priority: String,
     pub remind_at: Option<String>,
     pub due_at: Option<String>,
+    pub parent_id: Option<String>,
 }
 
 impl Default for UpdateTaskRequest {
@@ -96,6 +99,7 @@ impl Default for UpdateTaskRequest {
             priority: "normal".to_string(),
             remind_at: None,
             due_at: None,
+            parent_id: None,
         }
     }
 }

@@ -103,6 +103,9 @@ export interface Task {
   content: string;
   completed: boolean;
   priority: string;
+  parent_id?: string | null;
+  depth?: number;
+  sort_order?: number;
   remind_at?: string | null;
   due_at?: string | null;
   completed_at?: string;
@@ -115,6 +118,7 @@ export interface CreateTaskRequest {
   title: string;
   content: string;
   priority: string;
+  parent_id?: string | null;
   remind_at?: string | null;
   due_at?: string | null;
 }
@@ -125,6 +129,7 @@ export interface UpdateTaskRequest {
   content: string;
   completed: boolean;
   priority: string;
+  parent_id?: string | null;
   remind_at?: string | null;
   due_at?: string | null;
 }
