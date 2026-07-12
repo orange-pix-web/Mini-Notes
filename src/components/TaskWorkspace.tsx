@@ -165,6 +165,7 @@ function TaskWorkspace({
   const [saveMessage, setSaveMessage] = useState("");
   const [renamingTaskId, setRenamingTaskId] = useState<string | null>(null);
   const [renamingTitle, setRenamingTitle] = useState("");
+  const [pendingDeleteTask, setPendingDeleteTask] = useState<Task | null>(null);
 
   useEffect(() => {
     setDraft(selectedTask);
@@ -227,6 +228,15 @@ function TaskWorkspace({
       setRenamingTitle("");
     }
   }, [onSaveTask, renamingTitle]);
+
+  const confirmDeleteTask = useCallback(async () => {
+    if (!pendingDeleteTask) {
+      return;
+    }
+
+    await onDeleteTask(pendingDeleteTask.id);
+    setPendingDeleteTask(null);
+  }, [onDeleteTask, pendingDeleteTask]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -452,7 +462,7 @@ function TaskWorkspace({
                 </button>
                 <button
                   type="button"
-                  onClick={() => void onDeleteTask(draft.id)}
+                  onClick={() => setPendingDeleteTask(draft)}
                   className="rounded-lg bg-red-50 px-3 py-1.5 text-sm font-medium text-red-500 hover:bg-red-100 transition-colors"
                 >
                   删除
@@ -513,6 +523,38 @@ function TaskWorkspace({
           </>
         )}
       </div>
+
+      {pendingDeleteTask ? (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/25">
+          <div className="w-[380px] rounded-xl bg-white p-4 shadow-xl">
+            <div className="text-sm font-semibold text-slate-800">确认删除待办</div>
+            <div className="mt-3 text-sm text-slate-600">
+              确定删除“{pendingDeleteTask.title}”吗？
+            </div>
+            <div className="mt-1 text-xs text-slate-400">
+              删除后会进入应用内回收站。
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingDeleteTask(null)}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-50"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void confirmDeleteTask();
+                }}
+                className="rounded-lg bg-red-500 px-3 py-1.5 text-sm text-white hover:bg-red-600"
+              >
+                删除
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

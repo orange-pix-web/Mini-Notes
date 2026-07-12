@@ -973,11 +973,6 @@ function App() {
   }, [loadAttachmentItems, loadAttachmentTree, selectedAttachmentFolder]);
 
   const handleDeleteAttachmentItem = useCallback(async (item: AttachmentItem) => {
-    const ok = window.confirm(`确定删除“${item.name}”吗？删除后会进入系统回收站。`);
-    if (!ok) {
-      return;
-    }
-
     try {
       const response = await deleteAttachmentItem(item.relative_path);
       if (response.success) {

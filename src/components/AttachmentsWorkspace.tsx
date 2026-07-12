@@ -283,6 +283,7 @@ function AttachmentsWorkspace({
   const [draggedPaths, setDraggedPaths] = useState<string[]>([]);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [renamingTreePath, setRenamingTreePath] = useState<string | null>(null);
+  const [pendingDeleteItem, setPendingDeleteItem] = useState<AttachmentItem | null>(null);
 
   const selectedFolderLabel = selectedFolder || "附件根目录";
 
@@ -556,6 +557,15 @@ function AttachmentsWorkspace({
     setRenamingTreePath(null);
   }, [onRenameItem, renameDraft]);
 
+  const confirmDeleteItem = useCallback(async () => {
+    if (!pendingDeleteItem) {
+      return;
+    }
+
+    await onDeleteItem(pendingDeleteItem);
+    setPendingDeleteItem(null);
+  }, [onDeleteItem, pendingDeleteItem]);
+
   return (
     <>
       <div className="w-[260px] bg-white border-r border-slate-200 flex flex-col">
@@ -623,7 +633,7 @@ function AttachmentsWorkspace({
               onSelectFolder={onSelectFolder}
               onOpenFolder={onOpenFolder}
               onDeleteItem={(node) => {
-                void onDeleteItem({
+                setPendingDeleteItem({
                   name: node.name,
                   relative_path: node.relative_path,
                   absolute_path: "",
@@ -806,7 +816,7 @@ function AttachmentsWorkspace({
                             type="button"
                             title="删除"
                             className="rounded px-1.5 py-0.5 text-xs text-slate-400 hover:bg-slate-100 hover:text-red-500"
-                            onClick={() => void onDeleteItem(item)}
+                            onClick={() => setPendingDeleteItem(item)}
                           >
                             🗑
                           </button>
@@ -916,7 +926,7 @@ function AttachmentsWorkspace({
                         type="button"
                         title="删除"
                         className="rounded px-2 py-1 text-xs text-slate-400 hover:bg-slate-100 hover:text-red-500"
-                        onClick={() => void onDeleteItem(item)}
+                        onClick={() => setPendingDeleteItem(item)}
                       >
                         删除
                       </button>
@@ -1034,6 +1044,38 @@ function AttachmentsWorkspace({
                 className="rounded-lg bg-blue-500 px-3 py-1.5 text-sm text-white hover:bg-blue-600"
               >
                 保存
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {pendingDeleteItem ? (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/25">
+          <div className="w-[380px] rounded-xl bg-white p-4 shadow-xl">
+            <div className="text-sm font-semibold text-slate-800">确认删除附件</div>
+            <div className="mt-3 text-sm text-slate-600">
+              确定删除“{pendingDeleteItem.name}”吗？
+            </div>
+            <div className="mt-1 text-xs text-slate-400">
+              删除后会进入系统回收站。
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingDeleteItem(null)}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-50"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void confirmDeleteItem();
+                }}
+                className="rounded-lg bg-red-500 px-3 py-1.5 text-sm text-white hover:bg-red-600"
+              >
+                删除
               </button>
             </div>
           </div>
