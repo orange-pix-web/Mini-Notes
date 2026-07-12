@@ -109,6 +109,25 @@ pub struct FileTreeNode {
     pub children: Vec<FileTreeNode>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AttachmentFolderNode {
+    pub name: String,
+    pub relative_path: String,
+    pub modified_at: Option<String>,
+    pub children: Vec<AttachmentFolderNode>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AttachmentItem {
+    pub name: String,
+    pub relative_path: String,
+    pub absolute_path: String,
+    pub item_type: String,
+    pub extension: Option<String>,
+    pub size: Option<u64>,
+    pub modified_at: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RenameNoteRequest {
     pub id: String,
@@ -134,4 +153,28 @@ pub struct FileNotePayload {
     pub relative_path: String,
     pub folder: String,
     pub content: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ImportAttachmentRequest {
+    pub file_paths: Vec<String>,
+    pub target_folder: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateAttachmentFolderRequest {
+    pub name: String,
+    pub parent_folder: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RenameAttachmentItemRequest {
+    pub old_path: String,
+    pub new_name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MoveAttachmentItemsRequest {
+    pub source_paths: Vec<String>,
+    pub target_folder: String,
 }

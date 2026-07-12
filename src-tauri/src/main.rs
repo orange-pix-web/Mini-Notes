@@ -3,6 +3,7 @@
     windows_subsystem = "windows"
 )]
 
+use base64::Engine as _;
 use log::{error, info};
 use rusqlite::{Connection, Result as SqlResult};
 use std::path::{Path, PathBuf};
@@ -16,8 +17,10 @@ mod types;
 
 use db::{Note, Todo};
 use types::{
-    ApiResponse, AppState, CreateNoteRequest, CreateTaskRequest, FileNotePayload,
-    RenameFolderRequest, RenameNoteRequest, SearchRequest, UpdateNoteRequest, UpdateTaskRequest,
+    ApiResponse, AppState, AttachmentFolderNode, AttachmentItem, CreateAttachmentFolderRequest,
+    CreateNoteRequest, CreateTaskRequest, FileNotePayload, ImportAttachmentRequest,
+    MoveAttachmentItemsRequest, RenameAttachmentItemRequest, RenameFolderRequest,
+    RenameNoteRequest, SearchRequest, UpdateNoteRequest, UpdateTaskRequest,
 };
 
 fn get_data_dir() -> PathBuf {
@@ -1301,6 +1304,16 @@ fn get_notes_root_dir(db_path: &Path) -> SqlResult<PathBuf> {
     }
 }
 
+fn get_attachments_root(db_path: &Path) -> SqlResult<PathBuf> {
+    let conn = Connection::open(db_path)?;
+
+    if let Some(path_str) = db::get_setting(&conn, "attachments_root_dir")? {
+        Ok(PathBuf::from(path_str))
+    } else {
+        Ok(get_data_dir().join("Attachments"))
+    }
+}
+
 fn move_to_system_trash(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
@@ -1434,6 +1447,556 @@ fn open_folder(relative_path: String) -> ApiResponse<()> {
 }
 
 #[command]
+fn get_attachment_tree() -> ApiResponse<Vec<AttachmentFolderNode>> {
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    let attachments_root = match get_attachments_root(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            return ApiResponse {
+                success: false,
+                message: format!("获取附件目录失败: {}", e),
+                data: None,
+            };
+        }
+    };
+
+    match fs::get_attachment_tree(&attachments_root) {
+        Ok(tree) => ApiResponse {
+            success: true,
+            message: "获取附件目录树成功".to_string(),
+            data: Some(tree),
+        },
+        Err(e) => ApiResponse {
+            success: false,
+            message: format!("获取附件目录树失败: {}", e),
+            data: None,
+        },
+    }
+}
+
+#[command]
+fn list_attachment_items(relative_path: String) -> ApiResponse<Vec<AttachmentItem>> {
+    if relative_path.starts_with('/')
+        || relative_path.starts_with('\\')
+        || relative_path.contains("..")
+    {
+        return ApiResponse {
+            success: false,
+            message: "路径包含非法字符".to_string(),
+            data: None,
+        };
+    }
+
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    let attachments_root = match get_attachments_root(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            return ApiResponse {
+                success: false,
+                message: format!("获取附件目录失败: {}", e),
+                data: None,
+            };
+        }
+    };
+    match fs::list_attachment_items(&attachments_root, &relative_path) {
+        Ok(items) => ApiResponse {
+            success: true,
+            message: "获取附件列表成功".to_string(),
+            data: Some(items),
+        },
+        Err(e) => ApiResponse {
+            success: false,
+            message: format!("获取附件列表失败: {}", e),
+            data: None,
+        },
+    }
+}
+
+#[command]
+fn open_attachment_item(relative_path: String) -> ApiResponse<()> {
+    if relative_path.starts_with('/')
+        || relative_path.starts_with('\\')
+        || relative_path.contains("..")
+    {
+        return ApiResponse {
+            success: false,
+            message: "路径包含非法字符".to_string(),
+            data: None,
+        };
+    }
+
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    let attachments_root = match get_attachments_root(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            return ApiResponse {
+                success: false,
+                message: format!("获取附件目录失败: {}", e),
+                data: None,
+            };
+        }
+    };
+    let target_path = if relative_path.is_empty() {
+        attachments_root
+    } else {
+        attachments_root.join(&relative_path)
+    };
+    if !target_path.exists() {
+        return ApiResponse {
+            success: false,
+            message: "附件不存在".to_string(),
+            data: None,
+        };
+    }
+
+    #[cfg(target_os = "macos")]
+    let command_result = Command::new("open").arg(&target_path).status();
+
+    #[cfg(target_os = "windows")]
+    let command_result = Command::new("explorer").arg(&target_path).status();
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    let command_result = Command::new("xdg-open").arg(&target_path).status();
+
+    match command_result {
+        Ok(status) if status.success() => ApiResponse {
+            success: true,
+            message: "附件已打开".to_string(),
+            data: None,
+        },
+        Ok(status) => ApiResponse {
+            success: false,
+            message: format!("打开附件失败: {:?}", status.code()),
+            data: None,
+        },
+        Err(e) => ApiResponse {
+            success: false,
+            message: format!("打开附件失败: {}", e),
+            data: None,
+        },
+    }
+}
+
+#[command]
+fn read_attachment_thumbnail(relative_path: String) -> ApiResponse<String> {
+    if relative_path.starts_with('/')
+        || relative_path.starts_with('\\')
+        || relative_path.contains("..")
+    {
+        return ApiResponse {
+            success: false,
+            message: "路径包含非法字符".to_string(),
+            data: None,
+        };
+    }
+
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    let attachments_root = match get_attachments_root(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            return ApiResponse {
+                success: false,
+                message: format!("获取附件目录失败: {}", e),
+                data: None,
+            };
+        }
+    };
+
+    let target_path = attachments_root.join(&relative_path);
+    if !target_path.exists() || !target_path.is_file() {
+        return ApiResponse {
+            success: false,
+            message: "附件不存在".to_string(),
+            data: None,
+        };
+    }
+
+    let mime_type = match target_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("bmp") => "image/bmp",
+        Some("svg") => "image/svg+xml",
+        _ => {
+            return ApiResponse {
+                success: false,
+                message: "不支持的图片格式".to_string(),
+                data: None,
+            };
+        }
+    };
+
+    match std::fs::read(&target_path) {
+        Ok(bytes) => {
+            let base64_data = base64::engine::general_purpose::STANDARD.encode(bytes);
+            ApiResponse {
+                success: true,
+                message: "读取缩略图成功".to_string(),
+                data: Some(format!("data:{};base64,{}", mime_type, base64_data)),
+            }
+        }
+        Err(e) => ApiResponse {
+            success: false,
+            message: format!("读取缩略图失败: {}", e),
+            data: None,
+        },
+    }
+}
+
+#[command]
+fn import_attachment_files(request: ImportAttachmentRequest) -> ApiResponse<Vec<AttachmentItem>> {
+    if request.target_folder.starts_with('/')
+        || request.target_folder.starts_with('\\')
+        || request.target_folder.contains("..")
+    {
+        return ApiResponse {
+            success: false,
+            message: "目标路径包含非法字符".to_string(),
+            data: None,
+        };
+    }
+
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    let attachments_root = match get_attachments_root(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            return ApiResponse {
+                success: false,
+                message: format!("获取附件目录失败: {}", e),
+                data: None,
+            };
+        }
+    };
+
+    match fs::import_attachment_sources(
+        &attachments_root,
+        &request.target_folder,
+        &request.file_paths,
+    ) {
+        Ok(items) => ApiResponse {
+            success: true,
+            message: "附件导入成功".to_string(),
+            data: Some(items),
+        },
+        Err(e) => ApiResponse {
+            success: false,
+            message: format!("附件导入失败: {}", e),
+            data: None,
+        },
+    }
+}
+
+#[command]
+fn move_attachment_items(request: MoveAttachmentItemsRequest) -> ApiResponse<Vec<String>> {
+    if request.target_folder.starts_with('/')
+        || request.target_folder.starts_with('\\')
+        || request.target_folder.contains("..")
+        || request
+            .source_paths
+            .iter()
+            .any(|path| path.starts_with('/') || path.starts_with('\\') || path.contains(".."))
+    {
+        return ApiResponse {
+            success: false,
+            message: "路径包含非法字符".to_string(),
+            data: None,
+        };
+    }
+
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    let attachments_root = match get_attachments_root(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            return ApiResponse {
+                success: false,
+                message: format!("获取附件目录失败: {}", e),
+                data: None,
+            };
+        }
+    };
+
+    match fs::move_attachment_items(
+        &attachments_root,
+        &request.source_paths,
+        &request.target_folder,
+    ) {
+        Ok(paths) => ApiResponse {
+            success: true,
+            message: "附件移动成功".to_string(),
+            data: Some(paths),
+        },
+        Err(e) => ApiResponse {
+            success: false,
+            message: format!("附件移动失败: {}", e),
+            data: None,
+        },
+    }
+}
+
+#[command]
+fn create_attachment_folder(request: CreateAttachmentFolderRequest) -> ApiResponse<String> {
+    if request.name.trim().is_empty() {
+        return ApiResponse {
+            success: false,
+            message: "文件夹名称不能为空".to_string(),
+            data: None,
+        };
+    }
+
+    if request.parent_folder.starts_with('/')
+        || request.parent_folder.starts_with('\\')
+        || request.parent_folder.contains("..")
+    {
+        return ApiResponse {
+            success: false,
+            message: "父级路径包含非法字符".to_string(),
+            data: None,
+        };
+    }
+
+    let sanitized_name: String = request
+        .name
+        .trim()
+        .chars()
+        .filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+        .collect();
+
+    if sanitized_name.is_empty() {
+        return ApiResponse {
+            success: false,
+            message: "文件夹名称无效".to_string(),
+            data: None,
+        };
+    }
+
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    let attachments_root = match get_attachments_root(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            return ApiResponse {
+                success: false,
+                message: format!("获取附件目录失败: {}", e),
+                data: None,
+            };
+        }
+    };
+
+    let parent_dir = if request.parent_folder.is_empty() {
+        attachments_root.clone()
+    } else {
+        attachments_root.join(&request.parent_folder)
+    };
+
+    if !parent_dir.exists() || !parent_dir.is_dir() {
+        return ApiResponse {
+            success: false,
+            message: "父级文件夹不存在".to_string(),
+            data: None,
+        };
+    }
+
+    let mut folder_name = sanitized_name.clone();
+    let mut folder_path = parent_dir.join(&folder_name);
+    let mut counter = 1;
+    while folder_path.exists() {
+        folder_name = format!("{}_{}", sanitized_name, counter);
+        folder_path = parent_dir.join(&folder_name);
+        counter += 1;
+    }
+
+    match std::fs::create_dir_all(&folder_path) {
+        Ok(_) => ApiResponse {
+            success: true,
+            message: "附件文件夹创建成功".to_string(),
+            data: Some(
+                folder_path
+                    .strip_prefix(&attachments_root)
+                    .unwrap_or(&folder_path)
+                    .to_string_lossy()
+                    .to_string(),
+            ),
+        },
+        Err(e) => ApiResponse {
+            success: false,
+            message: format!("创建附件文件夹失败: {}", e),
+            data: None,
+        },
+    }
+}
+
+#[command]
+fn rename_attachment_item(request: RenameAttachmentItemRequest) -> ApiResponse<String> {
+    if request.old_path.starts_with('/')
+        || request.old_path.starts_with('\\')
+        || request.old_path.contains("..")
+    {
+        return ApiResponse {
+            success: false,
+            message: "路径包含非法字符".to_string(),
+            data: None,
+        };
+    }
+
+    let sanitized_name: String = request
+        .new_name
+        .trim()
+        .chars()
+        .filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+        .collect();
+
+    if sanitized_name.is_empty() {
+        return ApiResponse {
+            success: false,
+            message: "名称不能为空".to_string(),
+            data: None,
+        };
+    }
+
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    let attachments_root = match get_attachments_root(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            return ApiResponse {
+                success: false,
+                message: format!("获取附件目录失败: {}", e),
+                data: None,
+            };
+        }
+    };
+
+    let old_full_path = attachments_root.join(&request.old_path);
+    if !old_full_path.exists() {
+        return ApiResponse {
+            success: false,
+            message: "附件不存在".to_string(),
+            data: None,
+        };
+    }
+
+    let parent_dir = old_full_path.parent().unwrap_or(&attachments_root);
+    let extension = old_full_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_string());
+
+    let mut new_file_name = if old_full_path.is_file() {
+        match extension {
+            Some(ref ext) if !ext.is_empty() => format!("{}.{}", sanitized_name, ext),
+            _ => sanitized_name.clone(),
+        }
+    } else {
+        sanitized_name.clone()
+    };
+
+    let mut new_full_path = parent_dir.join(&new_file_name);
+    let mut counter = 1;
+    while new_full_path.exists() && new_full_path != old_full_path {
+        new_file_name = if old_full_path.is_file() {
+            match extension {
+                Some(ref ext) if !ext.is_empty() => {
+                    format!("{}_{}.{}", sanitized_name, counter, ext)
+                }
+                _ => format!("{}_{}", sanitized_name, counter),
+            }
+        } else {
+            format!("{}_{}", sanitized_name, counter)
+        };
+        new_full_path = parent_dir.join(&new_file_name);
+        counter += 1;
+    }
+
+    match std::fs::rename(&old_full_path, &new_full_path) {
+        Ok(_) => ApiResponse {
+            success: true,
+            message: "附件重命名成功".to_string(),
+            data: Some(
+                new_full_path
+                    .strip_prefix(&attachments_root)
+                    .unwrap_or(&new_full_path)
+                    .to_string_lossy()
+                    .to_string(),
+            ),
+        },
+        Err(e) => ApiResponse {
+            success: false,
+            message: format!("附件重命名失败: {}", e),
+            data: None,
+        },
+    }
+}
+
+#[command]
+fn delete_attachment_item(relative_path: String) -> ApiResponse<()> {
+    if relative_path.is_empty() {
+        return ApiResponse {
+            success: false,
+            message: "不能删除附件根目录".to_string(),
+            data: None,
+        };
+    }
+
+    if relative_path.starts_with('/')
+        || relative_path.starts_with('\\')
+        || relative_path.contains("..")
+    {
+        return ApiResponse {
+            success: false,
+            message: "路径包含非法字符".to_string(),
+            data: None,
+        };
+    }
+
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+    let attachments_root = match get_attachments_root(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            return ApiResponse {
+                success: false,
+                message: format!("获取附件目录失败: {}", e),
+                data: None,
+            };
+        }
+    };
+
+    let target_path = attachments_root.join(&relative_path);
+    if !target_path.exists() {
+        return ApiResponse {
+            success: false,
+            message: "附件不存在".to_string(),
+            data: None,
+        };
+    }
+
+    match move_to_system_trash(&target_path) {
+        Ok(_) => ApiResponse {
+            success: true,
+            message: "附件已移入系统回收站".to_string(),
+            data: Some(()),
+        },
+        Err(e) => ApiResponse {
+            success: false,
+            message: format!("删除附件失败: {}", e),
+            data: None,
+        },
+    }
+}
+
+#[command]
 fn get_workspace_info() -> ApiResponse<serde_json::Value> {
     let data_dir = get_data_dir();
     let db_path = data_dir.join("database").join("index.db");
@@ -1449,6 +2012,17 @@ fn get_workspace_info() -> ApiResponse<serde_json::Value> {
             };
         }
     };
+    let attachments_root_dir = match get_attachments_root(&db_path) {
+        Ok(path) => path,
+        Err(e) => {
+            error!("[WORKSPACE] 获取附件根目录失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: "获取工作区信息失败".to_string(),
+                data: None,
+            };
+        }
+    };
 
     ApiResponse {
         success: true,
@@ -1456,6 +2030,7 @@ fn get_workspace_info() -> ApiResponse<serde_json::Value> {
         data: Some(serde_json::json!({
             "data_dir": data_dir.to_string_lossy().to_string(),
             "notes_root_dir": notes_root_dir.to_string_lossy().to_string(),
+            "attachments_root_dir": attachments_root_dir.to_string_lossy().to_string(),
             "database_path": db_path.to_string_lossy().to_string(),
         })),
     }
@@ -1533,6 +2108,96 @@ fn set_notes_root_dir(path: String) -> ApiResponse<serde_json::Value> {
     db::scan_and_sync_notes(&db_path, &dir_path);
 
     info!("[WORKSPACE] 笔记根目录已设置: {}", path);
+
+    get_workspace_info()
+}
+
+#[command]
+fn set_attachments_root_dir(path: String) -> ApiResponse<serde_json::Value> {
+    let data_dir = get_data_dir();
+    let db_path = data_dir.join("database").join("index.db");
+
+    let dir_path = PathBuf::from(&path);
+
+    if !dir_path.exists() {
+        return ApiResponse {
+            success: false,
+            message: "路径不存在".to_string(),
+            data: None,
+        };
+    }
+
+    if !dir_path.is_dir() {
+        return ApiResponse {
+            success: false,
+            message: "路径不是目录".to_string(),
+            data: None,
+        };
+    }
+
+    match std::fs::read_dir(&dir_path) {
+        Ok(_) => (),
+        Err(e) => {
+            return ApiResponse {
+                success: false,
+                message: format!("目录不可读: {}", e),
+                data: None,
+            };
+        }
+    }
+
+    let test_file = dir_path.join(".mininotes_attachments_test");
+    match std::fs::write(&test_file, "test") {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&test_file);
+        }
+        Err(e) => {
+            return ApiResponse {
+                success: false,
+                message: format!("目录不可写: {}", e),
+                data: None,
+            };
+        }
+    }
+
+    if let Err(e) = std::fs::create_dir_all(dir_path.join("images")) {
+        return ApiResponse {
+            success: false,
+            message: format!("创建 images 目录失败: {}", e),
+            data: None,
+        };
+    }
+
+    if let Err(e) = std::fs::create_dir_all(dir_path.join("files")) {
+        return ApiResponse {
+            success: false,
+            message: format!("创建 files 目录失败: {}", e),
+            data: None,
+        };
+    }
+
+    let conn = match Connection::open(&db_path) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("[WORKSPACE] 打开数据库失败: {}", e);
+            return ApiResponse {
+                success: false,
+                message: "打开数据库失败".to_string(),
+                data: None,
+            };
+        }
+    };
+
+    if let Err(e) = db::set_setting(&conn, "attachments_root_dir", &path) {
+        error!("[WORKSPACE] 保存附件目录设置失败: {}", e);
+        return ApiResponse {
+            success: false,
+            message: "保存设置失败".to_string(),
+            data: None,
+        };
+    }
+
+    info!("[WORKSPACE] 附件根目录已设置: {}", path);
 
     get_workspace_info()
 }
@@ -1763,8 +2428,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             delete_file_note,
             get_workspace_info,
             set_notes_root_dir,
+            set_attachments_root_dir,
             scan_notes,
             get_file_tree,
+            get_attachment_tree,
+            list_attachment_items,
+            open_attachment_item,
+            read_attachment_thumbnail,
+            import_attachment_files,
+            move_attachment_items,
+            create_attachment_folder,
+            rename_attachment_item,
+            delete_attachment_item,
             rename_note,
             rename_folder,
             open_folder,

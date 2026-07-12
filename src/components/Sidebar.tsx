@@ -2,6 +2,7 @@ import type { NavItem, NavOption } from "@/types";
 
 const quickNavOptions: NavOption[] = [
   { id: "all", label: "全部笔记", icon: "📝" },
+  { id: "attachments", label: "附件", icon: "📎" },
   { id: "tasks", label: "待办", icon: "✅" },
   { id: "trash", label: "回收站", icon: "🗑️" },
 ];
@@ -28,6 +29,8 @@ interface SidebarProps {
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
   onOpenSearch?: () => void;
+  attachmentsDir?: string;
+  onAttachmentsDirChange?: () => void;
 }
 
 function Sidebar({ 
@@ -49,6 +52,8 @@ function Sidebar({
   collapsed = false,
   onToggleCollapsed,
   onOpenSearch,
+  attachmentsDir,
+  onAttachmentsDirChange,
 }: SidebarProps) {
   const handleNewNoteClick = () => {
     console.log("[UI] new note button clicked");
@@ -67,6 +72,12 @@ function Sidebar({
   const isCreating = createStatus?.state === "creating";
   const isFailed = createStatus?.state === "failed";
   const isSuccess = createStatus?.state === "success";
+
+  const isAttachmentsPage = activeNav === "attachments";
+  const footerTitle = isAttachmentsPage ? "当前附件根目录" : "当前笔记文件夹";
+  const footerDir = isAttachmentsPage ? attachmentsDir : currentDir;
+  const footerAction = isAttachmentsPage ? onAttachmentsDirChange : onDirChange;
+  const footerActionLabel = isAttachmentsPage ? "[更换附件目录]" : "[更换文件夹]";
 
   return (
     <div className={`${collapsed ? "w-[68px]" : "w-[200px]"} bg-white border-r border-slate-200 flex flex-col transition-[width] duration-200`}>
@@ -211,23 +222,23 @@ function Sidebar({
           <div className="flex flex-col items-center gap-2">
             <button
               type="button"
-              onClick={onDirChange}
+              onClick={footerAction}
               className="w-full flex justify-center rounded-lg p-2 text-slate-500 hover:bg-slate-50 hover:text-blue-500 transition-colors"
-              title={currentDir || "~/MiniNotes"}
-              aria-label="更换文件夹"
+              title={footerDir || "~/MiniNotes"}
+              aria-label={isAttachmentsPage ? "更换附件目录" : "更换文件夹"}
             >
               <span aria-hidden="true">📂</span>
             </button>
           </div>
         ) : (
           <div className="text-xs text-slate-400">
-            <div>当前笔记文件夹</div>
-            <div className="text-slate-500 truncate">{currentDir || "~/MiniNotes"}</div>
+            <div>{footerTitle}</div>
+            <div className="text-slate-500 truncate">{footerDir || "~/MiniNotes"}</div>
             <button 
-              onClick={onDirChange}
+              onClick={footerAction}
               className="text-blue-500 text-xs mt-1 hover:underline"
             >
-              [更换文件夹]
+              {footerActionLabel}
             </button>
           </div>
         )}

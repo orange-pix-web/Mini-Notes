@@ -80,6 +80,23 @@ export interface Attachment {
   deleted_at?: string;
 }
 
+export interface AttachmentFolderNode {
+  name: string;
+  relative_path: string;
+  modified_at?: string | null;
+  children: AttachmentFolderNode[];
+}
+
+export interface AttachmentItem {
+  name: string;
+  relative_path: string;
+  absolute_path: string;
+  item_type: "folder" | "image" | "file";
+  extension?: string | null;
+  size?: number | null;
+  modified_at?: string | null;
+}
+
 export interface Task {
   id: string;
   title: string;

@@ -5,8 +5,9 @@ import Editor from "@/components/Editor";
 import SearchModal from "@/components/SearchModal";
 import TaskWorkspace from "@/components/TaskWorkspace";
 import TrashWorkspace from "@/components/TrashWorkspace";
-import { initApp, listNotes, createNote, createFolder, getWorkspaceInfo, setNotesRootDir, getFileTree, readFileNote, writeFileNote, renameFileNote, deleteFileNote, moveFile, deleteFolder, renameFolder, openFolder, searchNotes, listTasks, createTask, updateTask, deleteTask, restoreTask, permanentlyDeleteTask } from "@/api";
-import type { Note, NavItem, FileTreeNode, FileNotePayload, SearchResultItem, Task, UpdateTaskRequest } from "@/types";
+import AttachmentsWorkspace from "@/components/AttachmentsWorkspace";
+import { initApp, listNotes, createNote, createFolder, getWorkspaceInfo, setNotesRootDir, setAttachmentsRootDir, getFileTree, readFileNote, writeFileNote, renameFileNote, deleteFileNote, moveFile, deleteFolder, renameFolder, openFolder, searchNotes, listTasks, createTask, updateTask, deleteTask, restoreTask, permanentlyDeleteTask, getAttachmentTree, listAttachmentItems, openAttachmentItem, importAttachmentFiles, createAttachmentFolder, renameAttachmentItem, deleteAttachmentItem, moveAttachmentItems } from "@/api";
+import type { Note, NavItem, FileTreeNode, FileNotePayload, SearchResultItem, Task, UpdateTaskRequest, AttachmentFolderNode, AttachmentItem } from "@/types";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
 
@@ -28,12 +29,16 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [deletedTasks, setDeletedTasks] = useState<Task[]>([]);
   const [selectedDeletedTaskId, setSelectedDeletedTaskId] = useState<string | null>(null);
+  const [attachmentTree, setAttachmentTree] = useState<AttachmentFolderNode[]>([]);
+  const [selectedAttachmentFolder, setSelectedAttachmentFolder] = useState("");
+  const [attachmentItems, setAttachmentItems] = useState<AttachmentItem[]>([]);
   const [activeNav, setActiveNav] = useState<NavItem>("all");
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [fileTree, setFileTree] = useState<FileTreeNode[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isFileTreeLoading, setIsFileTreeLoading] = useState(true);
   const [notesRootDir, setNotesRootDirState] = useState("");
+  const [attachmentsRootDir, setAttachmentsRootDirState] = useState("");
   const [createStatus, setCreateStatus] = useState<{
     state: "idle" | "creating" | "success" | "failed";
     message: string;
@@ -178,6 +183,28 @@ function App() {
     }
   }, []);
 
+  const loadAttachmentTree = useCallback(async () => {
+    try {
+      const response = await getAttachmentTree();
+      if (response.success && response.data) {
+        setAttachmentTree(response.data);
+      }
+    } catch (error) {
+      console.error("[APP] Failed to load attachment tree:", error);
+    }
+  }, []);
+
+  const loadAttachmentItems = useCallback(async (relativePath = "") => {
+    try {
+      const response = await listAttachmentItems(relativePath);
+      if (response.success && response.data) {
+        setAttachmentItems(response.data);
+      }
+    } catch (error) {
+      console.error("[APP] Failed to load attachment items:", error);
+    }
+  }, []);
+
   const loadFileTree = useCallback(async () => {
     setIsFileTreeLoading(true);
     try {
@@ -204,17 +231,20 @@ function App() {
         const workspaceResponse = await getWorkspaceInfo();
         if (workspaceResponse.success && workspaceResponse.data) {
           setNotesRootDirState(workspaceResponse.data.notes_root_dir);
+          setAttachmentsRootDirState(workspaceResponse.data.attachments_root_dir);
         }
         await loadNotes();
         await loadFileTree();
         await loadActiveTasks();
         await loadDeletedTasks();
+        await loadAttachmentTree();
+        await loadAttachmentItems("");
       } catch (error) {
         console.error("Initialization failed:", error);
       }
     };
     initialize();
-  }, [loadNotes, loadFileTree, loadActiveTasks, loadDeletedTasks]);
+  }, [loadNotes, loadFileTree, loadActiveTasks, loadDeletedTasks, loadAttachmentTree, loadAttachmentItems]);
 
   useEffect(() => {
     console.log("[APP] fileTree state changed:", fileTree.length, "nodes");
@@ -231,8 +261,14 @@ function App() {
       return;
     }
 
+    if (activeNav === "attachments") {
+      void loadAttachmentTree();
+      void loadAttachmentItems(selectedAttachmentFolder);
+      return;
+    }
+
     void loadNotes();
-  }, [activeNav, activeFolder, loadNotes, loadActiveTasks, loadDeletedTasks]);
+  }, [activeNav, activeFolder, loadNotes, loadActiveTasks, loadDeletedTasks, loadAttachmentTree, loadAttachmentItems, selectedAttachmentFolder]);
 
   const expandFolderPath = useCallback((folderPath: string) => {
     const segments = folderPath.split("/").filter(Boolean);
@@ -450,6 +486,10 @@ function App() {
     setActiveFolder(null);
     if (nav === "tasks" || nav === "trash") {
       setSelectedFile(null);
+    }
+    if (nav === "attachments") {
+      setSelectedFile(null);
+      setSelectedAttachmentFolder("");
     }
   }, []);
 
@@ -809,6 +849,7 @@ function App() {
         const apiResponse = await setNotesRootDir(selected);
         if (apiResponse.success && apiResponse.data) {
           setNotesRootDirState(apiResponse.data.notes_root_dir);
+          setAttachmentsRootDirState(apiResponse.data.attachments_root_dir);
           await loadNotes();
           await loadFileTree();
         } else {
@@ -819,6 +860,148 @@ function App() {
       console.error("Failed to select directory:", error);
     }
   }, [loadNotes, loadFileTree]);
+
+  const handleAttachmentsDirChange = useCallback(async () => {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "选择附件文件夹",
+      });
+
+      if (selected && typeof selected === "string") {
+        const response = await setAttachmentsRootDir(selected);
+        if (response.success && response.data) {
+          setAttachmentsRootDirState(response.data.attachments_root_dir);
+          setSelectedAttachmentFolder("");
+          await loadAttachmentTree();
+          await loadAttachmentItems("");
+        } else {
+          console.error("[APP] Failed to set attachments directory:", response.message);
+        }
+      }
+    } catch (error) {
+      console.error("[APP] Failed to select attachments directory:", error);
+    }
+  }, [loadAttachmentItems, loadAttachmentTree]);
+
+  const handleImportAttachments = useCallback(async () => {
+    try {
+      const selected = await open({
+        directory: false,
+        multiple: true,
+        title: "导入附件文件",
+      });
+
+      if (!selected) {
+        return;
+      }
+
+      const filePaths = Array.isArray(selected) ? selected.filter((item): item is string => typeof item === "string") : [selected];
+      if (filePaths.length === 0) {
+        return;
+      }
+
+      const response = await importAttachmentFiles(filePaths, selectedAttachmentFolder);
+      if (response.success) {
+        await loadAttachmentTree();
+        await loadAttachmentItems(selectedAttachmentFolder);
+      } else {
+        console.error("[APP] Failed to import attachments:", response.message);
+      }
+    } catch (error) {
+      console.error("[APP] Failed to import attachments:", error);
+    }
+  }, [loadAttachmentItems, loadAttachmentTree, selectedAttachmentFolder]);
+
+  const handleOpenAttachmentFolder = useCallback(async (relativePath: string) => {
+    try {
+      const response = await openAttachmentItem(relativePath);
+      if (!response.success) {
+        console.error("[APP] Failed to open attachment folder:", response.message);
+      }
+    } catch (error) {
+      console.error("[APP] Failed to open attachment folder:", error);
+    }
+  }, []);
+
+  const handleCreateAttachmentFolder = useCallback(async (name: string) => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      return;
+    }
+
+    try {
+      const response = await createAttachmentFolder({
+        name: trimmedName,
+        parent_folder: selectedAttachmentFolder,
+      });
+      if (response.success && response.data) {
+        await loadAttachmentTree();
+        setSelectedAttachmentFolder(selectedAttachmentFolder);
+        await loadAttachmentItems(selectedAttachmentFolder);
+      } else {
+        console.error("[APP] Failed to create attachment folder:", response.message);
+      }
+    } catch (error) {
+      console.error("[APP] Failed to create attachment folder:", error);
+    }
+  }, [loadAttachmentItems, loadAttachmentTree, selectedAttachmentFolder]);
+
+  const handleRenameAttachmentItem = useCallback(async (item: AttachmentItem, name: string) => {
+    const newName = name.trim();
+    if (!newName) {
+      return;
+    }
+
+    try {
+      const response = await renameAttachmentItem({
+        old_path: item.relative_path,
+        new_name: newName,
+      });
+      if (response.success) {
+        await loadAttachmentTree();
+        await loadAttachmentItems(selectedAttachmentFolder);
+      } else {
+        console.error("[APP] Failed to rename attachment item:", response.message);
+      }
+    } catch (error) {
+      console.error("[APP] Failed to rename attachment item:", error);
+    }
+  }, [loadAttachmentItems, loadAttachmentTree, selectedAttachmentFolder]);
+
+  const handleDeleteAttachmentItem = useCallback(async (item: AttachmentItem) => {
+    const ok = window.confirm(`确定删除“${item.name}”吗？删除后会进入系统回收站。`);
+    if (!ok) {
+      return;
+    }
+
+    try {
+      const response = await deleteAttachmentItem(item.relative_path);
+      if (response.success) {
+        await loadAttachmentTree();
+        await loadAttachmentItems(selectedAttachmentFolder);
+      } else {
+        console.error("[APP] Failed to delete attachment item:", response.message);
+      }
+    } catch (error) {
+      console.error("[APP] Failed to delete attachment item:", error);
+    }
+  }, [loadAttachmentItems, loadAttachmentTree, selectedAttachmentFolder]);
+
+  const handleMoveAttachmentItems = useCallback(async (sourcePaths: string[], targetFolder: string) => {
+    try {
+      const response = await moveAttachmentItems(sourcePaths, targetFolder);
+      if (response.success) {
+        await loadAttachmentTree();
+        await loadAttachmentItems(selectedAttachmentFolder);
+      } else {
+        console.error("[APP] Failed to move attachment items:", response.message);
+      }
+    } catch (error) {
+      console.error("[APP] Failed to move attachment items:", error);
+    }
+  }, [loadAttachmentItems, loadAttachmentTree, selectedAttachmentFolder]);
 
   const handleNoteDeleted = useCallback(async () => {
     const currentFile = selectedFile;
@@ -929,6 +1112,8 @@ function App() {
         onNewFolder={handleNewFolderClick}
         currentDir={notesRootDir}
         onDirChange={handleDirChange}
+        attachmentsDir={attachmentsRootDir}
+        onAttachmentsDirChange={handleAttachmentsDirChange}
         createStatus={createStatus}
         showNewFolderModal={showNewFolderModal}
         newFolderName={newFolderName}
@@ -958,6 +1143,26 @@ function App() {
           onSelectTask={setSelectedDeletedTaskId}
           onRestoreTask={handleTaskRestored}
           onPermanentlyDeleteTask={handleTaskPermanentDelete}
+        />
+      ) : activeNav === "attachments" ? (
+        <AttachmentsWorkspace
+          tree={attachmentTree}
+          items={attachmentItems}
+          selectedFolder={selectedAttachmentFolder}
+          attachmentsRootDir={attachmentsRootDir}
+          onSelectFolder={(path) => {
+            setSelectedAttachmentFolder(path);
+            void loadAttachmentItems(path);
+          }}
+          onOpenItem={async (path) => {
+            await openAttachmentItem(path);
+          }}
+          onImportFiles={handleImportAttachments}
+          onOpenFolder={handleOpenAttachmentFolder}
+          onCreateFolder={handleCreateAttachmentFolder}
+          onRenameItem={handleRenameAttachmentItem}
+          onDeleteItem={handleDeleteAttachmentItem}
+          onMoveItems={handleMoveAttachmentItems}
         />
       ) : (
         <>

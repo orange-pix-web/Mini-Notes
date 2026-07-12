@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Note, CreateNoteRequest, CreateFolderRequest, UpdateNoteRequest, SearchRequest, ApiResponse, FileTreeNode, RenameNoteRequest, FileNotePayload, MoveFileRequest, RenameFolderRequest, Task, CreateTaskRequest, UpdateTaskRequest } from "@/types";
+import type { Note, CreateNoteRequest, CreateFolderRequest, UpdateNoteRequest, SearchRequest, ApiResponse, FileTreeNode, RenameNoteRequest, FileNotePayload, MoveFileRequest, RenameFolderRequest, Task, CreateTaskRequest, UpdateTaskRequest, AttachmentFolderNode, AttachmentItem } from "@/types";
 
 export async function initApp(): Promise<ApiResponse<{ data_dir: string; db_path: string }>> {
   return invoke("init_app");
@@ -96,12 +96,16 @@ export async function importFile(note_id: string, file_path: string): Promise<Ap
   return invoke("import_file", { note_id, file_path });
 }
 
-export async function getWorkspaceInfo(): Promise<ApiResponse<{ data_dir: string; notes_root_dir: string; database_path: string }>> {
+export async function getWorkspaceInfo(): Promise<ApiResponse<{ data_dir: string; notes_root_dir: string; attachments_root_dir: string; database_path: string }>> {
   return invoke("get_workspace_info");
 }
 
-export async function setNotesRootDir(path: string): Promise<ApiResponse<{ data_dir: string; notes_root_dir: string; database_path: string }>> {
+export async function setNotesRootDir(path: string): Promise<ApiResponse<{ data_dir: string; notes_root_dir: string; attachments_root_dir: string; database_path: string }>> {
   return invoke("set_notes_root_dir", { path });
+}
+
+export async function setAttachmentsRootDir(path: string): Promise<ApiResponse<{ data_dir: string; notes_root_dir: string; attachments_root_dir: string; database_path: string }>> {
+  return invoke("set_attachments_root_dir", { path });
 }
 
 export async function scanNotes(): Promise<ApiResponse<{ notes_root_dir: string }>> {
@@ -228,4 +232,50 @@ export async function restoreTask(id: string): Promise<ApiResponse<void>> {
 
 export async function permanentlyDeleteTask(id: string): Promise<ApiResponse<void>> {
   return invoke("permanently_delete_todo", { id });
+}
+
+export async function getAttachmentTree(): Promise<ApiResponse<AttachmentFolderNode[]>> {
+  return invoke("get_attachment_tree");
+}
+
+export async function listAttachmentItems(relativePath = ""): Promise<ApiResponse<AttachmentItem[]>> {
+  return invoke("list_attachment_items", { relativePath });
+}
+
+export async function openAttachmentItem(relativePath: string): Promise<ApiResponse<void>> {
+  return invoke("open_attachment_item", { relativePath });
+}
+
+export async function importAttachmentFiles(filePaths: string[], targetFolder = ""): Promise<ApiResponse<AttachmentItem[]>> {
+  return invoke("import_attachment_files", {
+    request: {
+      file_paths: filePaths,
+      target_folder: targetFolder,
+    },
+  });
+}
+
+export async function readAttachmentThumbnail(relativePath: string): Promise<ApiResponse<string>> {
+  return invoke("read_attachment_thumbnail", { relativePath });
+}
+
+export async function createAttachmentFolder(request: CreateFolderRequest): Promise<ApiResponse<string>> {
+  return invoke("create_attachment_folder", { request });
+}
+
+export async function renameAttachmentItem(request: RenameFolderRequest): Promise<ApiResponse<string>> {
+  return invoke("rename_attachment_item", { request });
+}
+
+export async function deleteAttachmentItem(relativePath: string): Promise<ApiResponse<void>> {
+  return invoke("delete_attachment_item", { relativePath });
+}
+
+export async function moveAttachmentItems(sourcePaths: string[], targetFolder = ""): Promise<ApiResponse<string[]>> {
+  return invoke("move_attachment_items", {
+    request: {
+      source_paths: sourcePaths,
+      target_folder: targetFolder,
+    },
+  });
 }

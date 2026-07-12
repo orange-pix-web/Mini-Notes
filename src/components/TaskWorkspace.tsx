@@ -133,6 +133,12 @@ function TaskWorkspace({
         return;
       }
 
+      if (event.key.toLowerCase() === "n") {
+        event.preventDefault();
+        onCreateTask();
+        return;
+      }
+
       if (event.key.toLowerCase() === "s") {
         event.preventDefault();
         void handleSave();
@@ -148,7 +154,7 @@ function TaskWorkspace({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleSave]);
+  }, [handleSave, onCreateTask]);
 
   return (
     <>
