@@ -1096,8 +1096,8 @@ function App() {
 
   const sidebarPrimaryActionLabel = activeNav === "tasks" ? "新建待办" : "新建笔记";
   const sidebarSecondaryActionLabel = activeNav === "tasks" ? "新建子待办" : "新建文件夹";
-  const sidebarPrimaryActionIcon = activeNav === "tasks" ? "✅" : "📝";
-  const sidebarSecondaryActionIcon = activeNav === "tasks" ? "↳" : "📁";
+  const sidebarPrimaryActionIcon = activeNav === "tasks" ? "task" : "note";
+  const sidebarSecondaryActionIcon = activeNav === "tasks" ? "childTask" : "folder";
   const sidebarPrimaryAction = activeNav === "tasks"
     ? () => void handleTaskCreated(null)
     : handleNoteCreated;

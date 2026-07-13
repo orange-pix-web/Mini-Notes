@@ -741,7 +741,7 @@ fn map_todo_row(row: &rusqlite::Row<'_>) -> SqlResult<Todo> {
     })
 }
 
-const MAX_TODO_DEPTH: i64 = 2;
+const MAX_TODO_DEPTH: i64 = 1;
 
 fn todo_select_fields() -> &'static str {
     "id, title, content, completed, priority, parent_id, depth, sort_order, remind_at, due_at, created_at, updated_at, deleted_at"
@@ -837,11 +837,7 @@ pub fn create_todo(db_path: &Path, request: &CreateTaskRequest) -> SqlResult<Tod
     } else {
         request.title.trim().to_string()
     };
-    let priority = if request.priority.trim().is_empty() {
-        "normal".to_string()
-    } else {
-        request.priority.trim().to_string()
-    };
+    let priority = "normal".to_string();
     let parent_id = request
         .parent_id
         .clone()
@@ -928,11 +924,7 @@ pub fn update_todo(db_path: &Path, request: &UpdateTaskRequest) -> SqlResult<Tod
     } else {
         request.title.trim().to_string()
     };
-    let priority = if request.priority.trim().is_empty() {
-        "normal".to_string()
-    } else {
-        request.priority.trim().to_string()
-    };
+    let priority = "normal".to_string();
 
     let previous_parent_id: Option<String> = conn.query_row(
         "SELECT parent_id FROM todos WHERE id = ? AND deleted_at IS NULL",

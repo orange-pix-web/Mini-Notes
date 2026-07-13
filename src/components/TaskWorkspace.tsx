@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Task, UpdateTaskRequest } from "@/types";
 
 interface TaskWorkspaceProps {
@@ -150,7 +150,7 @@ function createTaskSaveRequest(task: Task): UpdateTaskRequest {
     title: normalizedTask.title,
     content: normalizedTask.content,
     completed: normalizedTask.completed,
-    priority: normalizedTask.priority,
+    priority: "normal",
     parent_id: normalizedTask.parent_id ?? null,
     remind_at: normalizedTask.remind_at ?? null,
     due_at: normalizedTask.due_at ?? null,
@@ -171,10 +171,10 @@ function TaskWorkspace({
   const [parentSaveMessage, setParentSaveMessage] = useState("");
   const [pendingDeleteTask, setPendingDeleteTask] = useState<Task | null>(null);
   const [isParentExpanded, setIsParentExpanded] = useState(false);
+  const [isParentTimeEnabled, setIsParentTimeEnabled] = useState(false);
   const [expandedChildId, setExpandedChildId] = useState<string | null>(null);
   const [expandedChildDraft, setExpandedChildDraft] = useState<Task | null>(null);
-  const [isSavingChild, setIsSavingChild] = useState(false);
-  const [childSaveMessage, setChildSaveMessage] = useState("");
+  const parentEditorRef = useRef<HTMLDivElement | null>(null);
 
   const taskMap = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
   const { roots: taskTree, nodeMap } = useMemo(() => buildTaskTree(tasks), [tasks]);
@@ -188,16 +188,15 @@ function TaskWorkspace({
   }, [rootTasks, selectedTaskId, taskMap]);
 
   const selectedRootTask = selectedRootId ? taskMap.get(selectedRootId) ?? null : null;
-  const activeTaskId = selectedTaskId && taskMap.has(selectedTaskId) ? selectedTaskId : selectedRootId;
-  const activeTask = activeTaskId ? taskMap.get(activeTaskId) ?? null : null;
-  const activeNode = activeTaskId ? nodeMap.get(activeTaskId) ?? null : null;
+  const activeTaskId = selectedRootId;
+  const activeTask = selectedRootTask;
+  const activeNode = selectedRootId ? nodeMap.get(selectedRootId) ?? null : null;
   const childNodes = activeNode?.children ?? [];
   const selectedTaskPath = useMemo(() => buildTaskPath(activeTaskId, taskMap), [activeTaskId, taskMap]);
-  const activeDepth = activeTask?.depth ?? (activeTask ? buildTaskPath(activeTask.id, taskMap).split(" / ").length - 1 : 0);
-  const canCreateChild = Boolean(activeTask && activeDepth < 2);
-  const childLayerLabel = activeDepth === 0 ? "子待办" : "孙待办";
-  const createChildButtonLabel = activeDepth === 0 ? "新建子待办" : "新建孙待办";
-  const activeTaskLabel = activeDepth === 0 ? "父待办" : activeDepth === 1 ? "子待办" : "孙待办";
+  const canCreateChild = Boolean(activeTask);
+  const childLayerLabel = "子待办";
+  const createChildButtonLabel = "新建子待办";
+  const activeTaskLabel = "父待办";
 
   const [parentDraft, setParentDraft] = useState<Task | null>(activeTask);
 
@@ -211,6 +210,7 @@ function TaskWorkspace({
     setParentDraft(activeTask);
     setParentSaveMessage("");
     setIsParentExpanded(false);
+    setIsParentTimeEnabled(Boolean(activeTask?.remind_at || activeTask?.due_at));
   }, [activeTask]);
 
   useEffect(() => {
@@ -224,37 +224,50 @@ function TaskWorkspace({
 
   useEffect(() => {
     setExpandedChildDraft(expandedChildNode?.task ?? null);
-    setChildSaveMessage("");
   }, [expandedChildNode]);
 
   const progressStats = useMemo(() => buildProgressStats(childNodes), [childNodes]);
 
-  const handleParentSave = useCallback(async () => {
+  const handleParentSave = useCallback(async (collapseAfterSave = false) => {
     if (!parentDraft) {
       return;
     }
 
+    const draftToSave = {
+      ...parentDraft,
+      remind_at: isParentTimeEnabled ? parentDraft.remind_at ?? null : null,
+      due_at: isParentTimeEnabled ? parentDraft.due_at ?? null : null,
+    };
+
     setIsSavingParent(true);
     setParentSaveMessage("");
-    const saved = await onSaveTask(createTaskSaveRequest(parentDraft));
+    const saved = await onSaveTask(createTaskSaveRequest(draftToSave));
     setIsSavingParent(false);
     setParentSaveMessage(saved ? "已保存" : "保存失败");
-  }, [onSaveTask, parentDraft]);
 
-  const handleChildSave = useCallback(async () => {
+    if (saved && collapseAfterSave) {
+      setIsParentExpanded(false);
+    }
+  }, [isParentTimeEnabled, onSaveTask, parentDraft]);
+
+  const handleChildSave = useCallback(async (collapseAfterSave = false) => {
     if (!expandedChildDraft) {
       return;
     }
 
-    setIsSavingChild(true);
-    setChildSaveMessage("");
     const saved = await onSaveTask({
       ...createTaskSaveRequest(expandedChildDraft),
       remind_at: null,
       due_at: null,
     });
-    setIsSavingChild(false);
-    setChildSaveMessage(saved ? "已保存" : "保存失败");
+    if (!saved) {
+      console.error("[TASKS] Failed to save child task");
+      return;
+    }
+
+    if (collapseAfterSave) {
+      setExpandedChildId(null);
+    }
   }, [expandedChildDraft, onSaveTask]);
 
   const confirmDeleteTask = useCallback(async () => {
@@ -265,6 +278,38 @@ function TaskWorkspace({
     await onDeleteTask(pendingDeleteTask.id);
     setPendingDeleteTask(null);
   }, [onDeleteTask, pendingDeleteTask]);
+
+  useEffect(() => {
+    if (!isParentExpanded) {
+      return;
+    }
+
+    const isInsideParentEditor = (target: EventTarget | null) => {
+      return target instanceof Node && Boolean(parentEditorRef.current?.contains(target));
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (isInsideParentEditor(event.target)) {
+        return;
+      }
+      void handleParentSave(true);
+    };
+
+    const handleFocusIn = (event: FocusEvent) => {
+      if (isInsideParentEditor(event.target)) {
+        return;
+      }
+      void handleParentSave(true);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("focusin", handleFocusIn, true);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("focusin", handleFocusIn, true);
+    };
+  }, [handleParentSave, isParentExpanded]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -281,9 +326,7 @@ function TaskWorkspace({
 
       if (event.key.toLowerCase() === "n") {
         event.preventDefault();
-        if (event.shiftKey && expandedChildDraft) {
-          onCreateChildTask(expandedChildDraft.id);
-        } else if (event.shiftKey && activeTask && activeDepth < 2) {
+        if (event.shiftKey && activeTask) {
           onCreateChildTask(activeTask.id);
         } else {
           onCreateTask();
@@ -310,118 +353,91 @@ function TaskWorkspace({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeDepth, activeTask, expandedChildDraft, handleChildSave, handleParentSave, onCreateChildTask, onCreateTask]);
+  }, [activeTask, expandedChildDraft, handleChildSave, handleParentSave, onCreateChildTask, onCreateTask]);
 
   const renderChildCard = (node: TaskTreeNode) => {
-    const { task, children } = node;
+    const { task } = node;
     const isExpanded = expandedChildId === task.id;
-    const grandchildCount = children.length;
-    const completedGrandchildCount = children.filter((child) => child.task.completed).length;
+    const isSelected = selectedTaskId === task.id;
 
     return (
       <div
         key={task.id}
         className={`rounded-lg border bg-white transition-all ${
-          isExpanded ? "border-blue-300 shadow-sm" : "border-slate-200 hover:border-blue-200"
+          isExpanded
+            ? "border-blue-300 shadow-sm"
+            : isSelected
+              ? "border-blue-300 bg-blue-50/40"
+              : "border-slate-200 hover:border-blue-200"
         }`}
       >
-        <button
-          type="button"
-          onClick={() => {
-            setExpandedChildId((prev) => (prev === task.id ? null : task.id));
-          }}
-          onDoubleClick={() => {
-            onSelectTask(task.id);
-          }}
-          className="grid min-h-[56px] w-full grid-cols-[auto_1fr_auto] items-center gap-3 px-4 py-3 text-left"
-        >
-          <input
-            type="checkbox"
-            checked={isExpanded && expandedChildDraft ? expandedChildDraft.completed : task.completed}
-            onChange={(event) => {
-              const completed = event.target.checked;
-              if (isExpanded && expandedChildDraft) {
-                setExpandedChildDraft({ ...expandedChildDraft, completed });
-              } else {
-                void onToggleTaskCompleted(task, completed);
-              }
-            }}
-            onClick={(event) => event.stopPropagation()}
-          />
-          <div className="min-w-0">
-            <div className={`truncate text-sm font-semibold ${task.completed ? "text-slate-400 line-through" : "text-slate-800"}`}>
-              {getTaskDisplayText(task)}
-            </div>
-            <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
-              <span>{task.priority}</span>
-              <span>{completedGrandchildCount}/{grandchildCount} 个下一层</span>
-            </div>
-          </div>
-          <div className="flex items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                setExpandedChildId((prev) => (prev === task.id ? null : task.id));
-              }}
-              className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-200"
-            >
-              {isExpanded ? "收起" : "展开"}
-            </button>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                onSelectTask(task.id);
-              }}
-              className="rounded-lg bg-blue-50 px-3 py-1.5 text-xs text-blue-600 hover:bg-blue-100"
-            >
-              打开
-            </button>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                setPendingDeleteTask(task);
-              }}
-              className="rounded-lg bg-red-50 px-3 py-1.5 text-xs text-red-500 hover:bg-red-100"
-            >
-              删除
-            </button>
-          </div>
-        </button>
-
         {isExpanded && expandedChildDraft ? (
-          <div className="border-t border-slate-100 bg-slate-50 px-4 py-3">
+          <div
+            className="grid min-h-[116px] grid-cols-[auto_1fr] items-start gap-3 px-4 py-3"
+            onClick={() => onSelectTask(task.id)}
+            onDoubleClick={() => setExpandedChildId(null)}
+            onBlur={(event) => {
+              const nextTarget = event.relatedTarget as Node | null;
+              if (nextTarget && event.currentTarget.contains(nextTarget)) {
+                return;
+              }
+              void handleChildSave(true);
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={expandedChildDraft.completed}
+              onChange={(event) => setExpandedChildDraft({ ...expandedChildDraft, completed: event.target.checked })}
+              onClick={(event) => event.stopPropagation()}
+              className="mt-2"
+            />
             <textarea
               value={expandedChildDraft.content}
               onChange={(event) => setExpandedChildDraft({ ...expandedChildDraft, content: event.target.value })}
-              className="h-24 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-400"
-              placeholder="待办详情，第一行会作为显示文本..."
+              onClick={(event) => event.stopPropagation()}
+              onDoubleClick={(event) => event.stopPropagation()}
+              className="h-28 w-full resize-none rounded-lg border border-transparent bg-transparent px-2 py-2 text-sm leading-6 text-slate-700 outline-none focus:border-blue-200 focus:bg-white"
+              placeholder="子待办详情，第一行会作为显示文本..."
+              autoFocus
             />
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-              <select
-                value={expandedChildDraft.priority}
-                onChange={(event) => setExpandedChildDraft({ ...expandedChildDraft, priority: event.target.value })}
-                className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-slate-700 outline-none"
-              >
-                <option value="high">高优先级</option>
-                <option value="normal">中优先级</option>
-                <option value="low">低优先级</option>
-              </select>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onSelectTask(task.id)}
+            onDoubleClick={() => setExpandedChildId(task.id)}
+            className="grid min-h-[56px] w-full grid-cols-[auto_1fr_auto] items-center gap-3 px-4 py-3 text-left"
+          >
+            <input
+              type="checkbox"
+              checked={task.completed}
+              onChange={(event) => {
+                void onToggleTaskCompleted(task, event.target.checked);
+              }}
+              onClick={(event) => event.stopPropagation()}
+            />
+            <div className="min-w-0">
+              <div className={`truncate text-sm font-semibold ${task.completed ? "text-slate-400 line-through" : "text-slate-800"}`}>
+                {getTaskDisplayText(task)}
+              </div>
+              <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
+                <span>{task.completed ? "已完成" : "未完成"}</span>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2">
               <button
                 type="button"
-                onClick={() => void handleChildSave()}
-                className="rounded-lg bg-blue-500 px-3 py-1.5 text-white hover:bg-blue-600"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setPendingDeleteTask(task);
+                }}
+                className="rounded-lg bg-red-50 px-3 py-1.5 text-xs text-red-500 hover:bg-red-100"
               >
-                保存
+                删除
               </button>
-              <span className={`text-xs ${isSavingChild ? "text-blue-500" : "text-slate-400"}`}>
-                {isSavingChild ? "保存中..." : childSaveMessage || "打开后查看下一层"}
-              </span>
             </div>
-          </div>
-        ) : null}
+          </button>
+        )}
       </div>
     );
   };
@@ -479,7 +495,7 @@ function TaskWorkspace({
                         {getTaskDisplayText(task)}
                       </div>
                       <div className="mt-1 line-clamp-2 text-xs text-slate-400">
-                        {task.content || "右侧查看子待办和孙待办"}
+                        {task.content || "右侧查看子待办"}
                       </div>
                       <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-400">
                         <span>{children.length} 个子待办</span>
@@ -500,28 +516,25 @@ function TaskWorkspace({
             <div className="text-center text-slate-400">
               <span className="text-6xl mb-4 block">✅</span>
               <p className="text-lg">选择或新建父待办</p>
-              <p className="text-sm mt-2">左侧只显示父待办，右侧集中处理子待办与孙待办。</p>
+              <p className="text-sm mt-2">左侧只显示父待办，右侧集中处理子待办。</p>
             </div>
           </div>
         ) : (
           <>
-            <div className={`border-b border-slate-200 bg-white transition-all ${isParentExpanded ? "min-h-[34%]" : "min-h-[16%]"}`}>
+            <div className={`border-b border-slate-200 bg-white transition-all ${isParentExpanded ? "min-h-[26%]" : "min-h-[14%]"}`}>
               <div className="flex items-start justify-between gap-4 px-4 py-2.5">
                 <div className="min-w-0 flex-1">
-                  {parentDraft.parent_id ? (
-                    <button
-                      type="button"
-                      onClick={() => onSelectTask(parentDraft.parent_id!)}
-                      className="mb-2 rounded-lg bg-slate-100 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-200"
-                    >
-                      返回上级
-                    </button>
-                  ) : null}
                   <div className="flex items-center gap-3">
                     <input
                       type="checkbox"
                       checked={parentDraft.completed}
-                      onChange={(event) => setParentDraft({ ...parentDraft, completed: event.target.checked })}
+                      onChange={(event) => {
+                        const nextCompleted = event.target.checked;
+                        setParentDraft({ ...parentDraft, completed: nextCompleted });
+                        if (!isParentExpanded) {
+                          void onToggleTaskCompleted(parentDraft, nextCompleted);
+                        }
+                      }}
                     />
                     <div className="min-w-0 flex-1 truncate text-lg font-semibold text-slate-800">
                       {getTaskDisplayText(parentDraft)}
@@ -544,13 +557,6 @@ function TaskWorkspace({
                   ) : null}
                   <button
                     type="button"
-                    onClick={() => void handleParentSave()}
-                    className="rounded-lg bg-blue-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-600 transition-colors"
-                  >
-                    保存{activeTaskLabel}
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => setPendingDeleteTask(parentDraft)}
                     className="rounded-lg bg-red-50 px-3 py-1.5 text-sm font-medium text-red-500 hover:bg-red-100 transition-colors"
                   >
@@ -560,19 +566,16 @@ function TaskWorkspace({
               </div>
 
               <div className="px-4 pb-3">
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div
+                  ref={parentEditorRef}
+                  className={`rounded-lg border bg-slate-50 p-3 transition-colors ${
+                    isParentExpanded ? "border-blue-300" : "border-slate-200 hover:border-blue-200"
+                  }`}
+                  onDoubleClick={() => setIsParentExpanded(true)}
+                >
                   <div className="flex items-center justify-between gap-3 text-sm">
                     <span className="font-medium text-slate-700">进度 {progressStats.completed}/{progressStats.total}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-slate-400">{progressStats.percent}%</span>
-                      <button
-                        type="button"
-                        onClick={() => setIsParentExpanded((prev) => !prev)}
-                        className="rounded-lg bg-white px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100"
-                      >
-                        {isParentExpanded ? "收起详情" : "展开详情"}
-                      </button>
-                    </div>
+                    <span className="text-slate-400">{progressStats.percent}%</span>
                   </div>
                   <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-slate-200">
                     <div
@@ -581,21 +584,22 @@ function TaskWorkspace({
                     />
                   </div>
                   {isParentExpanded ? (
-                    <div className={`mt-3 grid gap-3 ${activeDepth === 0 ? "md:grid-cols-3" : "md:grid-cols-1"}`}>
-                      <label className="flex flex-col gap-1">
-                        <span className="text-xs text-slate-500">优先级</span>
-                        <select
-                          value={parentDraft.priority}
-                          onChange={(event) => setParentDraft({ ...parentDraft, priority: event.target.value })}
-                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none"
-                        >
-                          <option value="high">高</option>
-                          <option value="normal">中</option>
-                          <option value="low">低</option>
-                        </select>
+                    <div className="mt-3 space-y-3">
+                      <label className="inline-flex items-center gap-2 text-xs text-slate-500">
+                        <input
+                          type="checkbox"
+                          checked={isParentTimeEnabled}
+                          onChange={(event) => {
+                            setIsParentTimeEnabled(event.target.checked);
+                            if (!event.target.checked) {
+                              setParentDraft({ ...parentDraft, remind_at: null, due_at: null });
+                            }
+                          }}
+                        />
+                        设置时间
                       </label>
-                      {activeDepth === 0 ? (
-                        <>
+                      {isParentTimeEnabled ? (
+                        <div className="grid gap-3 md:grid-cols-2">
                           <label className="flex flex-col gap-1">
                             <span className="text-xs text-slate-500">提醒时间</span>
                             <input
@@ -614,7 +618,7 @@ function TaskWorkspace({
                               className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none"
                             />
                           </label>
-                        </>
+                        </div>
                       ) : null}
                     </div>
                   ) : null}
@@ -624,24 +628,25 @@ function TaskWorkspace({
                         value={parentDraft.content}
                         onChange={(event) => setParentDraft({ ...parentDraft, content: event.target.value })}
                         placeholder={`${activeTaskLabel}详情，第一行会作为显示文本...`}
-                        className="h-32 w-full resize-none rounded-xl border border-slate-200 bg-white p-3 text-sm leading-6 text-slate-700 outline-none focus:border-blue-400"
+                        className="h-24 w-full resize-none rounded-xl border border-slate-200 bg-white p-3 text-sm leading-6 text-slate-700 outline-none focus:border-blue-400"
+                        autoFocus
                       />
                     ) : (
                       <div className="line-clamp-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-500">
-                        {getFirstContentLine(parentDraft.content) || "展开详情后填写父待办内容，第一行会作为显示文本。"}
+                        {getFirstContentLine(parentDraft.content) || "双击卡片编辑父待办内容，第一行会作为显示文本。"}
                       </div>
                     )}
                   </div>
                   <div className="mt-2 flex items-center justify-between text-xs text-slate-400">
                     <span>{primaryModifierLabel}+S 保存当前编辑中的待办</span>
-                    <span>{isSavingParent ? "保存中..." : parentSaveMessage || (activeDepth === 0 ? "父待办仅设置自己的时间，不继承给子级" : "当前层级不设置时间")}</span>
+                    <span>{isSavingParent ? "保存中..." : parentSaveMessage || "父待办仅设置自己的时间，不继承给子级"}</span>
                   </div>
                 </div>
               </div>
             </div>
 
             <div className="border-b border-slate-100 bg-slate-50 px-4 py-2 text-[11px] text-slate-400">
-              {childLayerLabel}以横条展示，展开只编辑当前条目，打开后进入下一层。
+              {childLayerLabel}以横条展示，展开可编辑当前条目。
             </div>
 
             <div className="flex-1 overflow-y-auto bg-slate-50 p-4">

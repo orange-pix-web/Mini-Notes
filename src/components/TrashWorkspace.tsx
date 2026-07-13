@@ -118,7 +118,6 @@ function TrashWorkspace({
           </div>
           <div className="mt-1 truncate text-xs text-slate-400">{task.content || "暂无详情"}</div>
           <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-400">
-            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-500">{task.priority}</span>
             <span>删除于 {formatDateTime(task.deleted_at)}</span>
           </div>
         </button>
@@ -170,7 +169,6 @@ function TrashWorkspace({
                 <div>
                   <h2 className="text-lg font-semibold text-slate-800">{selectedTask.title}</h2>
                   <div className="mt-2 flex gap-3 text-xs text-slate-400">
-                    <span>优先级：{selectedTask.priority}</span>
                     <span>层级：{selectedTask.depth ?? 0}</span>
                     <span>删除时间：{formatDateTime(selectedTask.deleted_at)}</span>
                   </div>

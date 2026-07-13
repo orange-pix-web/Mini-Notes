@@ -1,11 +1,131 @@
 import type { NavItem, NavOption } from "@/types";
+import type { ReactNode } from "react";
 
 const quickNavOptions: NavOption[] = [
-  { id: "all", label: "全部笔记", icon: "📝" },
-  { id: "attachments", label: "附件", icon: "📎" },
-  { id: "tasks", label: "待办", icon: "✅" },
-  { id: "trash", label: "回收站", icon: "🗑️" },
+  { id: "all", label: "全部笔记", icon: "notes" },
+  { id: "attachments", label: "附件", icon: "attachment" },
+  { id: "tasks", label: "待办", icon: "task" },
+  { id: "trash", label: "回收站", icon: "trash" },
 ];
+
+type SidebarIconName =
+  | "note"
+  | "folder"
+  | "search"
+  | "notes"
+  | "attachment"
+  | "task"
+  | "trash"
+  | "directory"
+  | "childTask"
+  | "collapse"
+  | "expand";
+
+function SidebarIcon({ name, className = "h-5 w-5" }: { name: SidebarIconName | string; className?: string }) {
+  const commonProps = {
+    className,
+    viewBox: "0 0 36 36",
+    fill: "none",
+    "aria-hidden": true,
+  };
+
+  switch (name) {
+    case "note":
+      return (
+        <svg {...commonProps}>
+          <rect x="9" y="6" width="18" height="24" rx="3" stroke="currentColor" strokeWidth="2" />
+          <path d="M14 13h8M14 18h7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case "folder":
+      return (
+        <svg {...commonProps}>
+          <path
+            d="M5 12.5C5 10.6 6.6 9 8.5 9H15l2.5 3H27.5C29.4 12 31 13.6 31 15.5v9C31 26.4 29.4 28 27.5 28h-19C6.6 28 5 26.4 5 24.5v-12Z"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
+    case "search":
+      return (
+        <svg {...commonProps}>
+          <circle cx="16" cy="16" r="8" stroke="currentColor" strokeWidth="2" />
+          <path d="M22 22l6 6" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+        </svg>
+      );
+    case "notes":
+      return (
+        <svg {...commonProps}>
+          <path d="M10 7h12l5 5v17H10V7Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+          <path d="M22 7v6h5M14 17h8M14 22h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case "attachment":
+      return (
+        <svg {...commonProps}>
+          <path
+            d="M13 19.5l7.8-7.8a5 5 0 1 1 7.1 7.1L17.2 29.5a7 7 0 0 1-9.9-9.9L19 7.9"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
+    case "task":
+      return (
+        <svg {...commonProps}>
+          <rect x="7" y="7" width="22" height="22" rx="5" stroke="currentColor" strokeWidth="2" />
+          <path d="M13 18l3.5 3.5L24 14" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case "trash":
+      return (
+        <svg {...commonProps}>
+          <path d="M11 13h14M15 13V9h6v4M13 13l1 16h8l1-16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case "directory":
+      return (
+        <svg {...commonProps}>
+          <path
+            d="M5 13c0-2 1.6-3.5 3.5-3.5H15l2.5 3H28c1.7 0 3 1.3 3 3v1.5"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinejoin="round"
+          />
+          <path d="M6 17h24l-2.5 11H8.5L6 17Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+        </svg>
+      );
+    case "childTask":
+      return (
+        <svg {...commonProps}>
+          <path d="M10 9v11c0 3.3 2.7 6 6 6h10" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+          <path d="M22 21l5 5-5 5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case "collapse":
+      return (
+        <svg {...commonProps}>
+          <path d="M21 10l-8 8 8 8" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case "expand":
+      return (
+        <svg {...commonProps}>
+          <path d="M15 10l8 8-8 8" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    default:
+      return <SidebarIcon name="notes" className={className} />;
+  }
+}
+
+function renderSidebarIcon(icon: SidebarIconName | string | ReactNode, className?: string) {
+  return typeof icon === "string" ? <SidebarIcon name={icon} className={className} /> : icon;
+}
 
 interface SidebarProps {
   activeNav: NavItem;
@@ -33,8 +153,8 @@ interface SidebarProps {
   onAttachmentsDirChange?: () => void;
   primaryActionLabel?: string;
   secondaryActionLabel?: string;
-  primaryActionIcon?: string;
-  secondaryActionIcon?: string;
+  primaryActionIcon?: SidebarIconName | string;
+  secondaryActionIcon?: SidebarIconName | string;
 }
 
 function Sidebar({ 
@@ -88,8 +208,8 @@ function Sidebar({
   const footerActionLabel = isAttachmentsPage ? "[更换附件目录]" : "[更换文件夹]";
   const resolvedPrimaryLabel = primaryActionLabel || "新建笔记";
   const resolvedSecondaryLabel = secondaryActionLabel || "新建文件夹";
-  const resolvedPrimaryIcon = primaryActionIcon || "📝";
-  const resolvedSecondaryIcon = secondaryActionIcon || "📁";
+  const resolvedPrimaryIcon = primaryActionIcon || "note";
+  const resolvedSecondaryIcon = secondaryActionIcon || "folder";
 
   return (
     <div className={`${collapsed ? "w-[68px]" : "w-[200px]"} bg-white border-r border-slate-200 flex flex-col transition-[width] duration-200`}>
@@ -112,7 +232,7 @@ function Sidebar({
                 title="展开侧边栏"
                 aria-label="展开侧边栏"
               >
-                ▶
+                <SidebarIcon name="expand" className="h-4 w-4" />
               </button>
             </div>
           ) : (
@@ -123,7 +243,7 @@ function Sidebar({
               title="折叠侧边栏"
               aria-label="折叠侧边栏"
             >
-              ◀
+              <SidebarIcon name="collapse" className="h-4 w-4" />
             </button>
           )}
         </div>
@@ -144,7 +264,7 @@ function Sidebar({
           }`}
         >
           <span className={`relative inline-flex items-center justify-center ${collapsed ? "text-lg" : ""}`}>
-            <span aria-hidden="true">{resolvedPrimaryIcon}</span>
+            {renderSidebarIcon(resolvedPrimaryIcon, "h-5 w-5")}
             <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-white text-[10px] font-bold text-blue-600">+</span>
           </span>
           {!collapsed && <span>{isCreating ? "创建中..." : resolvedPrimaryLabel}</span>}
@@ -161,7 +281,7 @@ function Sidebar({
           }`}
         >
           <span className={`relative inline-flex items-center justify-center ${collapsed ? "text-lg" : ""}`}>
-            <span aria-hidden="true">{resolvedSecondaryIcon}</span>
+            {renderSidebarIcon(resolvedSecondaryIcon, "h-5 w-5")}
             <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-white text-[10px] font-bold text-green-600">+</span>
           </span>
           {!collapsed && <span>{isCreating ? "创建中..." : resolvedSecondaryLabel}</span>}
@@ -175,7 +295,7 @@ function Sidebar({
             title="全局搜索"
             aria-label="全局搜索"
           >
-            <span aria-hidden="true" className="text-lg">🔎</span>
+            <SidebarIcon name="search" className="h-5 w-5" />
           </button>
         )}
 
@@ -221,7 +341,9 @@ function Sidebar({
                 : "text-slate-600 hover:bg-slate-50"
             }`}
           >
-            <span className={`${collapsed ? "text-lg" : "mr-2 text-base"}`}>{option.icon}</span>
+            <span className={`${collapsed ? "" : "mr-2"} inline-flex items-center justify-center`}>
+              <SidebarIcon name={option.icon} className="h-5 w-5" />
+            </span>
             {!collapsed && <span>{option.label}</span>}
           </button>
         ))}
@@ -239,7 +361,7 @@ function Sidebar({
               title={footerDir || "~/MiniNotes"}
               aria-label={isAttachmentsPage ? "更换附件目录" : "更换文件夹"}
             >
-              <span aria-hidden="true">📂</span>
+              <SidebarIcon name="directory" className="h-5 w-5" />
             </button>
           </div>
         ) : (
