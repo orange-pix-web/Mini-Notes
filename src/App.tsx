@@ -531,11 +531,6 @@ function App() {
   }, [loadActiveTasks, loadDeletedTasks]);
 
   const handleTaskDeleted = useCallback(async (id: string) => {
-    const ok = window.confirm("确定删除这个待办吗？删除后会进入应用内回收站。");
-    if (!ok) {
-      return;
-    }
-
     try {
       await deleteTask(id);
       await loadActiveTasks();
